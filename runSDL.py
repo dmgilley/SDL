@@ -2,7 +2,7 @@
 
 
 import sys, inspect, datetime, json, pickle, argparse
-from SDL.utility import *
+from sdlabs.utility import *
 
 
 def main(argv):

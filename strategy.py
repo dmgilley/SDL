@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 
 
-from SDL import material
+from sdlabs import material
 import numpy as np
 import sklearn.gaussian_process as GP
 
