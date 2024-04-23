@@ -25,6 +25,9 @@ def g1(params, p2=None):
     if isinstance(params, material.Material):
         p1 = params.pull_outputs('BladeCoat','temperature')[0]/400
         p2 = params.pull_outputs('BladeCoat','anneal_time')[0]/300
+    if isinstance(params, np.ndarray) and not p2:
+        p1 = params[:,0]/400
+        p2 = params[:,0]/300
     return 80*(f1(p1) + f2(p1,p2))
 
 
