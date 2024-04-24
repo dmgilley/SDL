@@ -2,33 +2,53 @@
 
 
 from sdlabs import material
+from sdlabs.utility import parse_function_inputs
 import numpy as np
 
 
-def f1(params):
-    p1 = params
-    if isinstance(params, material.Material):
-        p1 = params.pull_outputs('BladeCoat','temperature')[0]/400
-    return 2*p1/3*(1-np.sin(4*np.pi*p1))
+def f1(inputs):
+    p1 = parse_function_inputs(inputs, [('BladeCoat','coating_temperature')])
+    p1 = p1/500 # normalize to expected value
+    return 1-(2*p1-1)**2
 
 
-def f2(params, p2=None):
-    p1 = params
-    if isinstance(params, material.Material):
-        p1 = params.pull_outputs('BladeCoat','temperature')[0]/400
-        p2 = params.pull_outputs('BladeCoat','anneal_time')[0]/300
-    return p1/8*(1-np.sin(4*np.pi*p1)) - ((p2-0.2)**2)/4 + (1/2)
+def f2(inputs):
+    p1 = parse_function_inputs(inputs, [('BladeCoat','speed')])
+    p1 = (p1-1)/19 # normalize to expected value
+    return ((1+4*(p1-0.5))**3 + np.log(1-4*(p1-0.6)))/10
 
 
-def g1(params, p2=None):
-    p1 = params
-    if isinstance(params, material.Material):
-        p1 = params.pull_outputs('BladeCoat','temperature')[0]/400
-        p2 = params.pull_outputs('BladeCoat','anneal_time')[0]/300
-    if isinstance(params, np.ndarray) and not p2:
-        p1 = params[:,0]/400
-        p2 = params[:,0]/300
-    return 80*(f1(p1) + f2(p1,p2))
+def f3(inputs):
+    p1 = parse_function_inputs(inputs, [('BladeCoat','solvent_to_polymer_ratio')])
+    return (1+np.sin(10*p1))/2
+
+
+def f4(inputs):
+    p1 = parse_function_inputs(inputs, [('BladeCoat','relative_humidity')])
+    p1 = p1/100 # normalize to expected value
+    return (1+np.cos(20*p1))/2
+
+
+def f5(inputs):
+    p1 = parse_function_inputs(inputs, [('BladeCoat','solvent_BP')])
+    p1 = (p1-60)/120 # normalize to expected value
+    return 1-np.ln(p1+1)
+
+
+def f6(inputs):
+    p1 = parse_function_inputs(inputs, [('BladeCoat','annealing_time')])
+    p1 = p1/14 # normalize to expected value
+    return np.sqrt(p1)
+
+
+def f7(inputs):
+    p1 = parse_function_inputs(inputs, [('BladeCoat','annealing_temperature')])
+    p1 = (p1-25)/225 # normalize to expected value
+    return np.exp(p1-1)
+
+
+def g1(inputs):
+    return 6000*( f1(inputs)/7 + f2(inputs)/7 + f3(inputs)/7 + f4(inputs)/7 + f5(inputs)/7 + f6(inputs)/7 + f7(inputs)/7 )
 
 
 class Experiment:
@@ -107,7 +127,8 @@ class RamanSpectroscopy(Experiment):
             self,
             action_space=[],
             inputs={},
-            cost=1.2): # for now, assume same as UV/Vis
+            #cost=1.2): # for now, assume same as UV/Vis
+            cost=1.0+4.0): # temporary while adjusting experiment rewards
         super().__init__(
             category='characterization',
             action_space=action_space,
@@ -126,7 +147,8 @@ class UVVisSpectroscopy(Experiment):
             self,
             action_space=[],
             inputs={},
-            cost=0.16+1.0): # 10 min and 1/10 difficulty
+            #cost=0.16+1.0): # 10 min and 1/10 difficulty
+            cost=1.0+4.0): # temporary while adjusting experiment rewards
         super().__init__(
             category='characterization',
             action_space=action_space,
@@ -135,9 +157,9 @@ class UVVisSpectroscopy(Experiment):
         
     def calculate_outputs(self, sample, action):
         return {
-            'peak_position': f1(sample), # expected 200 - 700 nm
-            'peak_width': f1(sample), # expected 0 - 30 nm
-            'absorbance': f1(sample), # expected 0 - 1.5
+            'peak_position': f2(sample), # expected 200 - 700 nm
+            'peak_width': f3(sample), # expected 0 - 30 nm
+            'absorbance': f4(sample), # expected 0 - 1.5
         }
 
 
@@ -147,7 +169,8 @@ class EQCM(Experiment):
             self,
             action_space=[],
             inputs={},
-            cost=13.0+8.0): # 13 hr and 8/10 difficulty
+            #cost=13.0+8.0): # 13 hr and 8/10 difficulty
+            cost=1.0+4.0): # temporary while adjusting experiment rewards
         super().__init__(
             category='characterization',
             action_space=action_space,
@@ -156,7 +179,7 @@ class EQCM(Experiment):
         
     def calculate_outputs(self, sample, action):
         return {
-            'change_in_mass': f1(sample), # expected 0 - 100 %
+            'change_in_mass': f5(sample), # expected 0 - 100 %
         }
 
 
@@ -166,7 +189,7 @@ class CV(Experiment):
             self,
             action_space=[],
             inputs={},
-            cost=1.0+5.0): # best guess is 1 hr and 5/10 difficulty, but this is just a guess
+            cost=1.0+4.0): # best guess is 1 hr and 4/10 difficulty, but this is just a guess
         super().__init__(
             category='characterization',
             action_space=action_space,
@@ -175,7 +198,7 @@ class CV(Experiment):
         
     def calculate_outputs(self, sample, action):
         return {
-            'capacitance': f1(sample), # expected 10 - 1000 F cm-3
+            'capacitance': f5(sample), # expected 10 - 1000 F cm-3
         }
 
 
@@ -195,8 +218,8 @@ class SpectroElectroChemistry(Experiment):
     def calculate_outputs(self, sample, action):
         return {
             'peak_position_change': f1(sample), # expected 0 - 100 nm
-            'peak_width_change': f1(sample), # expected 0 - 30 nm
-            'absorbance_change': f1(sample), # expected 0 - 100 %
+            'peak_width_change': f3(sample), # expected 0 - 30 nm
+            'absorbance_change': f5(sample), # expected 0 - 100 %
         }
 
 
@@ -215,9 +238,9 @@ class AFM(Experiment):
         
     def calculate_outputs(self, sample, action):
         return {
-            'RMS_surface_roughness': [], # expected 0 - 50 nm
-            'phase_angle': [], # expected -90 to 90 degrees
-            'pore_size': [], # expected 0 - 1500 nm
+            'RMS_surface_roughness': f2(sample), # expected 0 - 50 nm
+            'phase_angle': f4(sample), # expected -90 to 90 degrees
+            'pore_size': f6(sample), # expected 0 - 1500 nm
         }
 
 
@@ -227,7 +250,7 @@ class GIWAXS(Experiment):
             self,
             action_space=[],
             inputs={},
-            cost=12.0+6.0): # 30 min to 1 day, 6/10 difficulty, total guess
+            cost=1.0+4.0): # 1 hr, 5/10 difficulty, total guess
         super().__init__(
             category='characterization',
             action_space=action_space,
@@ -236,26 +259,27 @@ class GIWAXS(Experiment):
         
     def calculate_outputs(self, sample, action):
         return {
-            'stacking_distance': [], # expected 1.5 to 6.0 Angstrom
-            'lamellar_size': [], # expected 5 to 80 degrees
+            'stacking_distance': f6(sample), # expected 1.5 to 6.0 Angstrom
+            'lamellar_size': f7(sample), # expected 5 to 80 degrees
         }
     
 
 class Stability(Experiment):
 
-    def __init__(self, action_space=[], inputs={}, cost=0.0):
+    def __init__(self, action_space=[], inputs={}, cost=0.0, stability_calc=g1):
         super().__init__(
             category='stability',
             action_space=action_space,
             inputs=inputs,
-            cost=cost
+            cost=cost,
             )
+        self.stability_calc=stability_calc
         
     def calculate_outputs(self, sample, action):
-        return {'stability': g1(sample)}
+        return {'stability': self.stability_calc(sample)}
     
-    def calc_stability(self, params, p2=None):
-        return g1(params, p2=p2)
+    def calc_stability(self, inputs):
+        return self.stability_calc(inputs)
 
 
 class VSDLEnvironment:

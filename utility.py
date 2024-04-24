@@ -351,6 +351,7 @@ class CampaignInfo():
             self.dump_to_output(agent=agent, run=run)
         return
     
+
 def pickleLoader(pklFile):
     try:
         while True:
@@ -358,12 +359,26 @@ def pickleLoader(pklFile):
     except EOFError:
         pass
 
+
 def dump_campaign_list(list_, filename):
     with open(filename, 'wb') as f:
         for _ in list_:
             pickle.dump(_,f)
     return
 
+
 def read_campaign_list(filename):
     with open(filename, 'rb') as f:
         return [_ for _ in pickleLoader(f)]
+    
+
+def parse_function_inputs(input,variables):
+    # input s/b Material instance or a dict
+    # variables s/b [(processing experiment name,variable name), ...]
+    if isinstance(input, material.Material):
+        if len(variables) == 1:
+            return input.pull_outputs(variables[0][0],variables[0][1])[0]
+        return tuple([input.pull_outputs(_[0],_[1])[0] for _ in variables])
+    if len(variables) == 1:
+        return input.get(variables[0][1],None).reshape(-1,1)
+    return tuple([input.get(_[1],None).reshape(-1,1) for _ in variables])
