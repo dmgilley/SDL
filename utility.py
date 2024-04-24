@@ -351,6 +351,22 @@ class CampaignInfo():
             self.dump_to_output(agent=agent, run=run)
         return
     
+    def run_and_dump_MAE(self):
+        data = read_output(
+            self.name + '.out.txt',
+            data=SDLOutputData(
+                    self.name, 
+                    calc_stability=self.environment.experiments['Stability'].calc_stability
+            )
+        )
+        self.dump_to_MAE()
+        for experiment_name in [k for k,v in self.environment.experiments.items() if v.category == 'processing']:
+            reference_inputs = self.environment.experiments[experiment_name].get_input_space()
+            reference_targets = data.calc_stability({k:reference_inputs[1][:,idx] for idx,k in enumerate(reference_inputs[0])})
+            MAE = {run: get_cumulative_MAE(data,run,reference_inputs[1],reference_targets) for run in range(1,data.runs+1)}
+            self.dump_to_MAE(MAE)
+        return
+    
 
 def pickleLoader(pklFile):
     try:
@@ -372,13 +388,13 @@ def read_campaign_list(filename):
         return [_ for _ in pickleLoader(f)]
     
 
-def parse_function_inputs(input,variables):
+def parse_function_inputs(inputs,variables):
     # input s/b Material instance or a dict
     # variables s/b [(processing experiment name,variable name), ...]
-    if isinstance(input, material.Material):
+    if isinstance(inputs, material.Material):
         if len(variables) == 1:
-            return input.pull_outputs(variables[0][0],variables[0][1])[0]
-        return tuple([input.pull_outputs(_[0],_[1])[0] for _ in variables])
+            return inputs.pull_outputs(variables[0][0],variables[0][1])[0]
+        return tuple([inputs.pull_outputs(_[0],_[1])[0] for _ in variables])
     if len(variables) == 1:
-        return input.get(variables[0][1],None).reshape(-1,1)
-    return tuple([input.get(_[1],None).reshape(-1,1) for _ in variables])
+        return inputs.get(variables[0][1],None).reshape(-1,1)
+    return tuple([inputs.get(_[1],None).reshape(-1,1) for _ in variables])

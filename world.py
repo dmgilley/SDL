@@ -15,7 +15,7 @@ def f1(inputs):
 def f2(inputs):
     p1 = parse_function_inputs(inputs, [('BladeCoat','speed')])
     p1 = (p1-1)/19 # normalize to expected value
-    return ((1+4*(p1-0.5))**3 + np.log(1-4*(p1-0.6)))/10
+    return 6.8*(p1**2 - p1**3)
 
 
 def f3(inputs):
@@ -32,7 +32,7 @@ def f4(inputs):
 def f5(inputs):
     p1 = parse_function_inputs(inputs, [('BladeCoat','solvent_BP')])
     p1 = (p1-60)/120 # normalize to expected value
-    return 1-np.ln(p1+1)
+    return 1-np.log(p1+1)
 
 
 def f6(inputs):
@@ -48,7 +48,13 @@ def f7(inputs):
 
 
 def g1(inputs):
-    return 6000*( f1(inputs)/7 + f2(inputs)/7 + f3(inputs)/7 + f4(inputs)/7 + f5(inputs)/7 + f6(inputs)/7 + f7(inputs)/7 )
+    return 6000/7*( f1(inputs) + f2(inputs) + f3(inputs) + f4(inputs) + f5(inputs) + f6(inputs) + f7(inputs) )
+
+def g2(inputs):
+    return 6000/4*( f1(inputs) + f2(inputs) + f3(inputs) + f4(inputs) )
+
+def g3(inputs):
+    return 6000/2*( f1(inputs) + f5(inputs) )
 
 
 class Experiment:
@@ -62,7 +68,7 @@ class Experiment:
     def calculate_outputs(self, material, action):
         return None
 
-    def get_input_space(self, length=100):
+    def get_input_space(self, length=20):
         if not self.inputs:
             return None
         input_labels = sorted(list(self.inputs.keys()))
@@ -137,7 +143,7 @@ class RamanSpectroscopy(Experiment):
         
     def calculate_outputs(self, sample, action):
         return {
-            'peak_position': f1(sample), # expected 4000 - 400 cm-1
+            'peak_position': f1(sample)*3600 + 400, # expected 4000 - 400 cm-1
         }
 
 
@@ -157,9 +163,9 @@ class UVVisSpectroscopy(Experiment):
         
     def calculate_outputs(self, sample, action):
         return {
-            'peak_position': f2(sample), # expected 200 - 700 nm
-            'peak_width': f3(sample), # expected 0 - 30 nm
-            'absorbance': f4(sample), # expected 0 - 1.5
+            'peak_position': f2(sample)*500 + 200, # expected 200 - 700 nm
+            'peak_width': f3(sample)*30, # expected 0 - 30 nm
+            'absorbance': f4(sample)*1.5, # expected 0 - 1.5
         }
 
 
@@ -208,7 +214,8 @@ class SpectroElectroChemistry(Experiment):
             self,
             action_space=[],
             inputs={},
-            cost=2.0+6.0): # best guess is 2 hr and 6/10 difficulty, but this is just a guess
+            #cost=2.0+6.0): # best guess is 2 hr and 6/10 difficulty, but this is just a guess
+            cost=2.0+8.0): # temporary while adjusting experiment rewards
         super().__init__(
             category='characterization',
             action_space=action_space,
@@ -217,9 +224,9 @@ class SpectroElectroChemistry(Experiment):
         
     def calculate_outputs(self, sample, action):
         return {
-            'peak_position_change': f1(sample), # expected 0 - 100 nm
-            'peak_width_change': f3(sample), # expected 0 - 30 nm
-            'absorbance_change': f5(sample), # expected 0 - 100 %
+            'peak_position_change': f2(sample)*100, # expected 0 - 100 nm
+            'peak_width_change': f3(sample)*30, # expected 0 - 30 nm
+            'absorbance_change': f4(sample)*100, # expected 0 - 100 %
         }
 
 
@@ -229,7 +236,8 @@ class AFM(Experiment):
             self,
             action_space=[],
             inputs={},
-            cost=12.0+6.0): # 30 min to 1 day, 6/10 difficulty
+            #cost=12.0+6.0): # 30 min to 1 day, 6/10 difficulty
+            cost=1.0+4.0): # temporary while adjusting experiment rewards
         super().__init__(
             category='characterization',
             action_space=action_space,
@@ -250,7 +258,8 @@ class GIWAXS(Experiment):
             self,
             action_space=[],
             inputs={},
-            cost=1.0+4.0): # 1 hr, 5/10 difficulty, total guess
+            #cost=1.0+4.0): # 1 hr, 5/10 difficulty, total guess
+            cost=1.0+4.0): # temporary while adjusting experiment rewards
         super().__init__(
             category='characterization',
             action_space=action_space,

@@ -25,19 +25,7 @@ def main(argv):
 
         # If MAE is requested, read the data back in from the output file and calculate the MAE
         if args.MAE:
-            data = read_output(
-                campaign.name + '.out.txt',
-                data=SDLOutputData(
-                    campaign.name, 
-                    calc_stability=campaign.environment.experiments['Stability'].calc_stability
-                    )
-                )
-            campaign.dump_to_MAE()
-            for experiment_name in [k for k,v in campaign.environment.experiments.items() if v.category == 'processing']:
-                reference_inputs = campaign.environment.experiments[experiment_name].get_input_space()[1]
-                reference_targets = data.calc_stability(reference_inputs)
-                MAE = {run: get_cumulative_MAE(data,run,reference_inputs,reference_targets) for run in range(1,data.runs+1)}
-                campaign.dump_to_MAE(MAE)
+            campaign.run_and_dump_MAE()
 
     return
 

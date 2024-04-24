@@ -181,7 +181,7 @@ class ArchitectureOne(MLStrategy):
 
     def BO_explore(self, action_space, environment):
         experiment_name = np.random.choice(action_space)
-        input_space = environment.experiments[experiment_name].get_input_space(length=100)
+        input_space = environment.experiments[experiment_name].get_input_space(length=20)
         parameters = {_:np.random.choice(input_space[1][:,idx]) for idx,_ in enumerate(input_space[0])}
         return material.Action(
             experiment_name,
@@ -192,7 +192,7 @@ class ArchitectureOne(MLStrategy):
     def BO_exploit(self, action_space, environment):
         best = (None, {}, -np.inf)
         for experiment_name in action_space:
-            input_space = environment.experiments[experiment_name].get_input_space(length=100)
+            input_space = environment.experiments[experiment_name].get_input_space(length=20)
             mean, std = self.GPRs[experiment_name].predict(input_space[1], return_std=True)
             max_idx = np.argmax(mean)
             max_val = mean[max_idx]
