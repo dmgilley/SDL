@@ -2,7 +2,7 @@
 
 
 from sdlabs import material
-import inspect, datetime, json, pickle
+import inspect, datetime, json, pickle, gc
 import numpy as np
 import sklearn.gaussian_process as GP
 import sklearn as skl
@@ -364,6 +364,8 @@ class CampaignInfo():
             reference_inputs = self.environment.experiments[experiment_name].get_input_space()
             reference_targets = data.calc_stability({k:reference_inputs[1][:,idx] for idx,k in enumerate(reference_inputs[0])})
             MAE = {run: get_cumulative_MAE(data,run,reference_inputs[1],reference_targets) for run in range(1,data.runs+1)}
+            del reference_inputs,reference_targets
+            gc.collect()
             self.dump_to_MAE(MAE)
         return
     

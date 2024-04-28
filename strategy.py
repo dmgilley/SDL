@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 
 
+import gc
 from sdlabs import material
 import numpy as np
 import sklearn.gaussian_process as GP
@@ -144,6 +145,8 @@ class ArchitectureOne(MLStrategy):
                 new_inputs = np.append(self.GPRs[state_name].X_train_, new_inputs, axis=0)
                 new_targets = np.append(self.GPRs[state_name].y_train_, new_targets, axis=0)
             self.GPRs[state_name].fit(new_inputs, new_targets)
+            del new_inputs,new_targets
+            gc.collect()
 
     def select_action(self, sample, environment):
         action_space = environment.get_action_space(sample)
@@ -161,28 +164,12 @@ class ArchitectureOne(MLStrategy):
         else:
             return self.BO_exploit(action_space, environment)
 
-    def BO_explore1(self, action_space, environment):
-        best = (None, {}, 0)
-        for experiment_name in action_space:
-            input_space = environment.experiments[experiment_name].get_input_space(length=100)
-            mean, std = self.GPRs[experiment_name].predict(input_space[1], return_std=True)
-            max_idx = np.argmax(std)
-            max_val = std[max_idx]
-            if max_val > best[2]:
-                best = (
-                    experiment_name,
-                    {var:input_space[1][max_idx,var_idx] for var_idx,var in enumerate(input_space[0])},
-                    max_val)
-        return material.Action(
-            best[0],
-            environment.experiments[best[0]].category,
-            parameters=best[1]
-            )
-
     def BO_explore(self, action_space, environment):
         experiment_name = np.random.choice(action_space)
         input_space = environment.experiments[experiment_name].get_input_space(length=20)
         parameters = {_:np.random.choice(input_space[1][:,idx]) for idx,_ in enumerate(input_space[0])}
+        del input_space
+        gc.collect()
         return material.Action(
             experiment_name,
             environment.experiments[experiment_name].category,
@@ -201,6 +188,8 @@ class ArchitectureOne(MLStrategy):
                     experiment_name,
                     {var:input_space[1][max_idx,var_idx] for var_idx,var in enumerate(input_space[0])},
                     max_val)
+            del input_space
+            gc.collect()
         return material.Action(
             best[0],
             environment.experiments[best[0]].category,
