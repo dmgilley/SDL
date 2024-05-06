@@ -185,6 +185,30 @@ def make_jsonable(obj):
             return obj.__dict__
         except:
             return 'Not jsonable ({})'.format(type(obj))
+        
+
+def is_jsonable(obj):
+    try:
+        json.loads(obj)
+        return obj
+    except:
+        return None
+
+
+def read_MAEoutput(MAEfile):
+    run = 0
+    MAEdata = {}
+    with open(MAEfile) as f:
+        for line in f:
+            fields = line.split()
+            if not fields: continue
+            if fields[0] == '#': continue
+            if fields[0].lower() == 'run':
+                run = int(fields[1])
+                continue
+            if is_jsonable(line):
+                MAEdata[run] = json.loads(line)
+    return MAEdata
 
 
 def get_batch_sample_numbers(start,samples_per_batch,batches):
@@ -208,14 +232,14 @@ class SDLOutputData():
         self.GPRs = {}
         self.savfs = {}
 
-    def get_batch_sample_numbers(self):
+    def get_batch_sample_numbers(self, power=2):
         return get_batch_sample_numbers(
-            self.sampling_procedure[0][1]**2,
+            self.sampling_procedure[0][1]**power,
             self.sampling_procedure[2][1],
             self.sampling_procedure[1][1],
             )
     
-    def collapse_batches(self, variable):
+    def combine_batches(self, variable):
         return {run:[(np.mean(_),np.std(_)) for _ in getattr(self,variable)[run]]
             for run in getattr(self,variable).keys()}
     
@@ -225,7 +249,7 @@ class SDLOutputData():
         ]
     
     def average_over_batches(self, variable):
-        by_run_dict = self.collapse_batches(variable)
+        by_run_dict = self.combine_batches(variable)
         result = [[by_run_dict[run][batch_idx][0] for run in sorted(by_run_dict.keys())]
             for batch_idx in range(self.sampling_procedure[1][1]+1)
         ]
@@ -235,7 +259,7 @@ class SDLOutputData():
             )
 
 
-def read_output(filename, data=None):
+def read_output(filename, data=None, power=2):
 
     if not data:
         data = SDLOutputData(filename[:-8])
@@ -276,7 +300,7 @@ def read_output(filename, data=None):
                 data.GPRs[run][fields[0]] = json.loads(' '.join(fields[1:]))
                 continue
 
-    samples = data.get_batch_sample_numbers()
+    samples = data.get_batch_sample_numbers(power=power)
     for run in range(1,data.runs+1):
         data.predicted_stabilities[run] = [[temp_dict['predicted_stabilities'][run][_] for _ in sample_number_list] for sample_number_list in samples]
         data.stabilities[run] = [[temp_dict['stabilities'][run][_] for _ in sample_number_list] for sample_number_list in samples]
