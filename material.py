@@ -36,6 +36,8 @@ class Material:
         if 'stability' in state.outputs.keys():
             self.stability = state.outputs['stability']
             self.closed = True
+        if state.category == 'turn_back':
+            self.closed = True
 
     def pull_outputs(self, state_name, output_names):
         if type(output_names) == str:

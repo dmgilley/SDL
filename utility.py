@@ -9,7 +9,9 @@ import sklearn as skl
 from copy import deepcopy
 
 
-def initial_VSDL_exploration(agent, environment, number_of_initial_datapoints=3, number_of_batches=20, samples_per_batch=5):
+def initial_VSDL_exploration(
+        agent, environment,
+        number_of_initial_datapoints=3, number_of_batches=20, samples_per_batch=5, verbose=False):
 
     # Get lists of experiments
     processing_names = environment.get_experiment_names(category='processing')
@@ -17,6 +19,8 @@ def initial_VSDL_exploration(agent, environment, number_of_initial_datapoints=3,
 
     # Loop over all processing options
     for pname_idx,pname in enumerate(processing_names):
+        if verbose:
+            print('\n  initial VSDL exploration of {} ({})...'.format(pname,datetime.datetime.now()))
         for row_idx in range(len(processing_parameters[pname_idx][1])):
 
             # Create a new material
@@ -56,11 +60,17 @@ def initial_VSDL_exploration(agent, environment, number_of_initial_datapoints=3,
     return agent
 
 
-def run_VSDL_campaign(agent, environment, number_of_initial_datapoints=3, number_of_batches=20, samples_per_batch=5):
+def run_VSDL_campaign(
+        agent, environment,
+        number_of_initial_datapoints=3, number_of_batches=20, samples_per_batch=5, verbose=False):
 
     for batch in range(number_of_batches):
+        if verbose:
+            print('\n  running batch {} ({})...'.format(batch,datetime.datetime.now()))
         agent.epsilon = np.min([0.95,agent.epsilon*1.3])
         for sample in range(samples_per_batch):
+            if verbose:
+                print('    running sample {}...'.format(sample))
             agent.reset()
             sample = material.Material()
             while not agent.done:
@@ -364,14 +374,18 @@ class CampaignInfo():
         return
 
     
-    def run(self):
+    def run(self, verbose=False):
         self.dump_to_output()
         for run in range(1,self.runs+1):
+            if verbose:
+                print('Run {} ({})'.format(run,datetime.datetime.now()))
             agent = deepcopy(self.agent)
             agent.initialize_GPRs(self.environment)
             agent.initialize_savfs(self.environment)        
-            agent = initial_VSDL_exploration(agent, self.environment, **{_[0]:_[1] for _ in  self.sampling_procedure})
-            agent = run_VSDL_campaign(agent, self.environment, self.sampling_procedure)
+            agent = initial_VSDL_exploration(agent, self.environment, verbose=verbose, **{_[0]:_[1] for _ in  self.sampling_procedure})
+            agent = run_VSDL_campaign(agent, self.environment, **{_[0]:_[1] for _ in  self.sampling_procedure}, verbose=verbose)
+            if verbose:
+                print('  dumping to output ({})...'.format(datetime.datetime.now()))
             self.dump_to_output(agent=agent, run=run)
         return
     

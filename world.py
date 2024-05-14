@@ -4,6 +4,7 @@
 from sdlabs import material
 from sdlabs.utility import parse_function_inputs
 import numpy as np
+from itertools import product
 
 
 def f1(inputs):
@@ -75,6 +76,17 @@ class Experiment:
         input_ranges = [np.linspace(self.inputs[_][0], self.inputs[_][1], num=length) for _ in input_labels]
         input_values = np.array(np.meshgrid(*input_ranges)).T.reshape(-1,len(input_ranges))
         return (input_labels, input_values)
+    
+    def yield_input_spaces(self, length=100, chunk_size=20):
+        if not self.inputs:
+            return None
+        input_labels = sorted(list(self.inputs.keys()))
+        input_ranges = [np.linspace(self.inputs[_][0], self.inputs[_][1], num=length) for _ in input_labels]
+        indices = [range(0, len(sublist), chunk_size) for sublist in input_ranges]
+        for indexes in product(*indices):
+            subranges = [sublist[idx:idx+chunk_size] for sublist, idx in zip(input_ranges, indexes)]
+            input_values = np.array(np.meshgrid(*subranges)).T.reshape(-1,len(subranges))
+            yield (input_labels,input_values)
 
 
 class BladeCoat(Experiment):
@@ -289,6 +301,20 @@ class Stability(Experiment):
     
     def calc_stability(self, inputs):
         return self.stability_calc(inputs)
+
+
+class TurnBack(Experiment):
+
+    def __init__(self, action_space=[], inputs={}, cost=0.0):
+        super().__init__(
+            category='turn_back',
+            action_space=action_space,
+            inputs=inputs,
+            cost=cost,
+            )
+        
+    def calculate_outputs(self, sample, action):
+        return {'None':None}
 
 
 class VSDLEnvironment:

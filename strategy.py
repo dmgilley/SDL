@@ -5,15 +5,43 @@ import gc
 from sdlabs import material
 import numpy as np
 import sklearn.gaussian_process as GP
+import scipy.stats as sps
 
 
-class MLStrategy():
-    
-    def __init__(self):
+class MLStrategy:
+    def __init__(self, epsilon, BO_acq_func_name='UCB'):
+        self.epsilon = epsilon
         self.states = {}
         self.rewards = {}
         self.stabilities = {}
         self.sample_number = 0
+        self.set_BO_acq_func(BO_acq_func_name)
+
+    def BO_probability_of_improvement(self, mean, std):
+        # Snoeck et al., "Practical Bayesian Optimization of Machine Learning Algorithms"
+        fbest = np.max([_ for _ in self.stabilities.values() if type(_) != list])
+        return sps.norm.cdf((mean - fbest) / std)
+
+    def BO_expected_improvement(self, mean, std):
+        # Frazier and Wang, "Bayesian Optimization for Materials Design"
+        fbest = np.max([_ for _ in self.stabilities.values() if type(_) != list])
+        gamma = (mean - fbest) / std
+        return (mean - fbest) * sps.norm.cdf(gamma) + std * sps.norm.pdf(gamma)
+
+    def BO_UCB(self, mean, std):
+        # Snoeck et al., "Practical Bayesian Optimization of Machine Learning Algorithms"
+        fbest = np.max([_ for _ in self.stabilities.values() if type(_) != list])
+        return mean + self.epsilon * std
+
+    def set_BO_acq_func(self, BO_acq_func_name):
+        BO_acq_func_map = {
+            'Probability of Improvement': self.BO_probability_of_improvement,
+            'Expected Improvement': self.BO_expected_improvement,
+            'UCB': self.BO_UCB,
+        }
+        if BO_acq_func_name not in BO_acq_func_map:
+            raise ValueError("Invalid BO_acq_func_name specified")
+        setattr(self, 'BO_acq_func', BO_acq_func_map[BO_acq_func_name])
 
     def select_action(self, sample, environment):
         action = material.Action('name', 'category', parameters={})
@@ -36,17 +64,16 @@ class MLStrategy():
 
     def update_after_episode(self, sample, environment):
         return None
-    
+
 
 class ArchitectureOne(MLStrategy):
 
     def __init__(self, discount=0.1, epsilon=0.5):
-        super().__init__()
+        super().__init__(epsilon)
         self.predicted_stabilities = {}
         self.savfs = {}
         self.GPRs = {}
         self.discount = discount
-        self.epsilon = epsilon
         self.processed_samples = 0
         self.done = False
 
@@ -55,7 +82,7 @@ class ArchitectureOne(MLStrategy):
 
     def initialize_GPRs(self, environment, kernel_type='RBF', kernel_dict={}, GPR_dict={'n_restarts_optimizer':5}):
         for experiment_name, experiment in environment.experiments.items():
-            if experiment.category == 'stability':
+            if experiment.category == 'stability' or experiment.category == 'turn_back':
                 continue
             kernel_class = getattr(GP.kernels, kernel_type)
             kernel = kernel_class(**kernel_dict)
@@ -70,6 +97,12 @@ class ArchitectureOne(MLStrategy):
         self.done = False
 
     def update_after_sample(self, sample, environment):
+        if sample.states[-1].category == 'turn_back':
+            self.states[self.sample_number] = sample.states
+            self.rewards[self.sample_number] = [_.reward for _ in sample.states]
+            mean, _ = self.predict_stability(sample.states[-2])
+            self.stabilities[self.sample_number] = mean
+            return
         self.states[self.sample_number] = sample.states
         self.rewards[self.sample_number] = [_.reward for _ in sample.states]
         self.stabilities[self.sample_number] = sample.stability
@@ -100,7 +133,7 @@ class ArchitectureOne(MLStrategy):
     
     def get_GPR_targets(self, existing_targets, sample_number, state):
         
-        stability = self.states[sample_number][-1].outputs['stability']
+        stability = self.stabilities[sample_number]
         predicted_stability_characterizations = [
             _ for idx,_ in enumerate(self.predicted_stabilities[sample_number])
             if self.states[sample_number][idx].category == 'characterization']
@@ -154,42 +187,26 @@ class ArchitectureOne(MLStrategy):
             action = self.BO_selection(action_space, environment)
         else:
             action = self.RL_selection(action_space, environment)
-        if action.category == 'stability':
+        if action.category == 'stability' or action.category == 'turn_back':
             self.done = True
         return action
 
     def BO_selection(self, action_space, environment):
-        if np.random.rand() > self.epsilon:
-            return self.BO_explore(action_space, environment)
-        else:
-            return self.BO_exploit(action_space, environment)
-
-    def BO_explore(self, action_space, environment):
-        experiment_name = np.random.choice(action_space)
-        input_space = environment.experiments[experiment_name].get_input_space(length=20)
-        parameters = {_:np.random.choice(input_space[1][:,idx]) for idx,_ in enumerate(input_space[0])}
-        del input_space
-        gc.collect()
-        return material.Action(
-            experiment_name,
-            environment.experiments[experiment_name].category,
-            parameters=parameters
-            )
-
-    def BO_exploit(self, action_space, environment):
-        best = (None, {}, -np.inf)
+        best = (None,{},-np.inf) # experiment name, {input labels:input values}, acq func value
         for experiment_name in action_space:
-            input_space = environment.experiments[experiment_name].get_input_space(length=20)
-            mean, std = self.GPRs[experiment_name].predict(input_space[1], return_std=True)
-            max_idx = np.argmax(mean)
-            max_val = mean[max_idx]
-            if max_val > best[2]:
-                best = (
-                    experiment_name,
-                    {var:input_space[1][max_idx,var_idx] for var_idx,var in enumerate(input_space[0])},
-                    max_val)
-            del input_space
-            gc.collect()
+            for input_labels,input_values in environment.experiments[experiment_name].yield_input_spaces(length=100):
+                mean, std = self.GPRs[experiment_name].predict(input_values, return_std=True)
+                acq_func_output = self.BO_acq_func(mean,std)
+                max_idx = np.argmax(acq_func_output)
+                max_val = acq_func_output[max_idx]
+                if max_val > best[2]:
+                    best = (
+                        experiment_name,
+                        {var:input_values[max_idx,var_idx] for var_idx,var in enumerate(input_labels)},
+                        max_val
+                        )
+                del input_values
+                gc.collect()
         return material.Action(
             best[0],
             environment.experiments[best[0]].category,
@@ -221,8 +238,10 @@ class ArchitectureOne(MLStrategy):
         outputs = environment.experiments[action.name].calculate_outputs(sample, action)
         faux_reward = 0.0
         state = material.State(action.name, action.category, outputs=outputs, reward=faux_reward)
-        if not action.name == 'Stability':
+        if action.name != 'Stability' and action.category != 'turn_back':
             mean, std = self.predict_stability(state)
+        elif action.category == 'turn_back':
+            mean, std = self.predicted_stabilities[self.sample_number][-1]
         else:
             mean, std = outputs['stability'], 0.0
         self.predicted_stabilities[self.sample_number].append((mean,std))
@@ -235,6 +254,9 @@ class ArchitectureOne(MLStrategy):
         return (temp[0].flatten()[0], temp[1].flatten()[0])
 
     def calculate_reward(self, action, sample, environment):
+        if action.category == 'turn_back':
+            mean, std = self.predicted_stabilities[self.sample_number][-1]
+            return -std/mean*100
         if len(self.predicted_stabilities[self.sample_number]) < 2:
             return -environment.experiments[action.name].cost
         pred_stab = self.predicted_stabilities[self.sample_number]
