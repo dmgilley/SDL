@@ -8,6 +8,34 @@ import sklearn.gaussian_process as GP
 import scipy.stats as sps
 
 
+import linecache
+import os
+import tracemalloc
+
+def display_top(snapshot, key_type='lineno', limit=10):
+    snapshot = snapshot.filter_traces((
+        tracemalloc.Filter(False, "<frozen importlib._bootstrap>"),
+        tracemalloc.Filter(False, "<unknown>"),
+    ))
+    top_stats = snapshot.statistics(key_type)
+
+    print("Top %s lines" % limit)
+    for index, stat in enumerate(top_stats[:limit], 1):
+        frame = stat.traceback[0]
+        print("#%s: %s:%s: %.1f KiB"
+              % (index, frame.filename, frame.lineno, stat.size / 1024))
+        line = linecache.getline(frame.filename, frame.lineno).strip()
+        if line:
+            print('    %s' % line)
+
+    other = top_stats[limit:]
+    if other:
+        size = sum(stat.size for stat in other)
+        print("%s other: %.1f KiB" % (len(other), size / 1024))
+    total = sum(stat.size for stat in top_stats)
+    print("Total allocated size: %.1f KiB" % (total / 1024))
+
+
 class MLStrategy:
     def __init__(self, epsilon, BO_acq_func_name='UCB'):
         self.epsilon = epsilon
@@ -192,9 +220,12 @@ class ArchitectureOne(MLStrategy):
         return action
 
     def BO_selection(self, action_space, environment):
+        tracemalloc.start()
         best = (None,{},-np.inf) # experiment name, {input labels:input values}, acq func value
         for experiment_name in action_space:
+            step = 1
             for input_labels,input_values in environment.experiments[experiment_name].yield_input_spaces(length=100):
+                print('        yielding inputs step {}'.format(step))
                 mean, std = self.GPRs[experiment_name].predict(input_values, return_std=True)
                 acq_func_output = self.BO_acq_func(mean,std)
                 max_idx = np.argmax(acq_func_output)
@@ -207,6 +238,12 @@ class ArchitectureOne(MLStrategy):
                         )
                 del input_values
                 gc.collect()
+                step += 1
+            print('        mean shape: {}'.format(mean.shape))
+            print('        std shape: {}'.format(std.shape))
+            print('        acq_func_output shape: {}'.format(acq_func_output.shape))
+        snapshot = tracemalloc.take_snapshot()
+        display_top(snapshot)
         return material.Action(
             best[0],
             environment.experiments[best[0]].category,
