@@ -59,9 +59,6 @@ class MLStrategy:
     def BO_UCB(self, mean, std):
         # Snoeck et al., "Practical Bayesian Optimization of Machine Learning Algorithms"
         fbest = np.max([_ for _ in self.stabilities.values() if type(_) != list])
-        print(self.epsilon)
-        print(mean.shape)
-        print(std.shape)
         return mean + self.epsilon * std
 
     def set_BO_acq_func(self, BO_acq_func_name):
@@ -223,13 +220,12 @@ class ArchitectureOne(MLStrategy):
         return action
 
     def BO_selection(self, action_space, environment):
-        tracemalloc.start()
         best = (None,{},-np.inf) # experiment name, {input labels:input values}, acq func value
         for experiment_name in action_space:
-            step = 1
             for input_labels,input_values in environment.experiments[experiment_name].yield_input_spaces(length=100):
-                print('        yielding inputs step {}'.format(step))
                 mean, std = self.GPRs[experiment_name].predict(input_values, return_std=True)
+                mean = mean.reshape(-1,1)
+                std = std.reshape(-1,1)
                 acq_func_output = self.BO_acq_func(mean,std)
                 max_idx = np.argmax(acq_func_output)
                 max_val = acq_func_output[max_idx]
@@ -241,12 +237,6 @@ class ArchitectureOne(MLStrategy):
                         )
                 del input_values
                 gc.collect()
-                step += 1
-            print('        mean shape: {}'.format(mean.shape))
-            print('        std shape: {}'.format(std.shape))
-            print('        acq_func_output shape: {}'.format(acq_func_output.shape))
-        snapshot = tracemalloc.take_snapshot()
-        display_top(snapshot)
         return material.Action(
             best[0],
             environment.experiments[best[0]].category,

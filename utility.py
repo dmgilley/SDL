@@ -98,15 +98,11 @@ def run_VSDL_campaign(
         agent.epsilon = np.min([0.95,agent.epsilon*1.3])
         for sample in range(samples_per_batch):
             if verbose:
-                print('    running sample {}...'.format(sample))
+                print('    running sample {} ({})...'.format(sample,datetime.datetime.now()))
             agent.reset()
             sample = material.Material()
             while not agent.done:
-                if verbose:
-                    print('      selecting action...')
                 action = agent.select_action(sample, environment)
-                if verbose:
-                    print('      taking action...')
                 state = agent.take_action(action, sample, environment)
                 sample.add_state(state)
                 agent.update_after_step(sample, environment)
