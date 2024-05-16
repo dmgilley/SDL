@@ -59,6 +59,9 @@ class MLStrategy:
     def BO_UCB(self, mean, std):
         # Snoeck et al., "Practical Bayesian Optimization of Machine Learning Algorithms"
         fbest = np.max([_ for _ in self.stabilities.values() if type(_) != list])
+        print(self.epsilon)
+        print(mean.shape)
+        print(std.shape)
         return mean + self.epsilon * std
 
     def set_BO_acq_func(self, BO_acq_func_name):
