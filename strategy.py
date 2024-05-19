@@ -222,7 +222,7 @@ class ArchitectureOne(MLStrategy):
     def BO_selection(self, action_space, environment):
         best = (None,{},-np.inf) # experiment name, {input labels:input values}, acq func value
         for experiment_name in action_space:
-            for input_labels,input_values in environment.experiments[experiment_name].yield_input_spaces(length=100):
+            for input_labels,input_values in environment.experiments[experiment_name].yield_input_spaces():
                 mean, std = self.GPRs[experiment_name].predict(input_values, return_std=True)
                 mean = mean.reshape(-1,1)
                 std = std.reshape(-1,1)

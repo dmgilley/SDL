@@ -77,7 +77,7 @@ class Experiment:
         input_values = np.array(np.meshgrid(*input_ranges)).T.reshape(-1,len(input_ranges))
         return (input_labels, input_values)
     
-    def yield_input_spaces(self, length=100, chunk_size=50):
+    def yield_input_spaces(self, length=50, chunk_size=25):
         if not self.inputs:
             return None
         input_labels = sorted(list(self.inputs.keys()))
