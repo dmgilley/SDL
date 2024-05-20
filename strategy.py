@@ -37,7 +37,7 @@ def display_top(snapshot, key_type='lineno', limit=10):
 
 
 class MLStrategy:
-    def __init__(self, epsilon, BO_acq_func_name='UCB'):
+    def __init__(self, epsilon, BO_acq_func_name):
         self.epsilon = epsilon
         self.states = {}
         self.rewards = {}
@@ -96,8 +96,8 @@ class MLStrategy:
 
 class ArchitectureOne(MLStrategy):
 
-    def __init__(self, discount=0.1, epsilon=0.5):
-        super().__init__(epsilon)
+    def __init__(self, discount=0.1, epsilon=0.5, BO_acq_func_name='UCB'):
+        super().__init__(epsilon, BO_acq_func_name)
         self.predicted_stabilities = {}
         self.savfs = {}
         self.GPRs = {}

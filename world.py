@@ -48,14 +48,38 @@ def f7(inputs):
     return np.exp(p1-1)
 
 
-def g1(inputs):
-    return 6000/7*( f1(inputs) + f2(inputs) + f3(inputs) + f4(inputs) + f5(inputs) + f6(inputs) + f7(inputs) )
+def f8(inputs):
+    p1 = parse_function_inputs(inputs, [('BladeCoat','speed')])
+    p2 = parse_function_inputs(inputs, [('BladeCoat','solvent_to_polymer_ratio')])
+    # normalize to expected values
+    p1 = (p1-1)/19
+    p2 = (p2-0)/1
+    return (1-np.sqrt( (p1-0.2)**2 + (p2-0.2)**2 ) ) / 1.1 + 0.12
 
-def g2(inputs):
+
+def f9(inputs):
+    p1 = parse_function_inputs(inputs, [('BladeCoat','speed')])
+    p3 = parse_function_inputs(inputs, [('BladeCoat','annealing_temperature')])
+    # normalize to expected values
+    p1 = (p1-1)/19
+    p3 = (p3-25)/225
+    return ( - p1**3 + p1**2 - (p3*0.7-0.5)**3 - (p3*0.7-0.5)**2 ) / 0.27 + 0.5
+
+
+def f10(inputs):
+    p2 = parse_function_inputs(inputs, [('BladeCoat','solvent_to_polymer_ratio')])
+    p3 = parse_function_inputs(inputs, [('BladeCoat','annealing_temperature')])
+    # normalize to expected values
+    p2 = (p2-0)/1
+    p3 = (p3-25)/225
+    return ( 1 - (np.sin(10*p2-0.5))**2/(p3+0.9)**1 + (p3-0.5)**3 - (p3-0.5)**2)/1.5 + 0.33
+
+
+def g1(inputs):
     return 6000/4*( f1(inputs) + f2(inputs) + f3(inputs) + f4(inputs) )
 
-def g3(inputs):
-    return 6000/2*( f1(inputs) + f5(inputs) )
+def g2(inputs):
+    return 6000/4*( f1(inputs) + f8(inputs) + f9(inputs) + f10(inputs) )
 
 
 class Experiment:
@@ -179,6 +203,27 @@ class UVVisSpectroscopy(Experiment):
             'peak_width': f3(sample)*30, # expected 0 - 30 nm
             'absorbance': f4(sample)*1.5, # expected 0 - 1.5
         }
+    
+class UVVisSpectroscopy2(Experiment):
+
+    def __init__(
+            self,
+            action_space=[],
+            inputs={},
+            #cost=0.16+1.0): # 10 min and 1/10 difficulty
+            cost=1.0+4.0): # temporary while adjusting experiment rewards
+        super().__init__(
+            category='characterization',
+            action_space=action_space,
+            inputs=inputs,
+            cost=cost)
+        
+    def calculate_outputs(self, sample, action):
+        return {
+            'peak_position': f8(sample)*500 + 200, # expected 200 - 700 nm
+            'peak_width': f9(sample)*30, # expected 0 - 30 nm
+            'absorbance': f10(sample)*1.5, # expected 0 - 1.5
+        }
 
 
 class EQCM(Experiment):
@@ -227,7 +272,7 @@ class SpectroElectroChemistry(Experiment):
             action_space=[],
             inputs={},
             #cost=2.0+6.0): # best guess is 2 hr and 6/10 difficulty, but this is just a guess
-            cost=2.0+8.0): # temporary while adjusting experiment rewards
+            cost=8.0+32.0): # temporary while adjusting experiment rewards
         super().__init__(
             category='characterization',
             action_space=action_space,
@@ -239,6 +284,27 @@ class SpectroElectroChemistry(Experiment):
             'peak_position_change': f2(sample)*100, # expected 0 - 100 nm
             'peak_width_change': f3(sample)*30, # expected 0 - 30 nm
             'absorbance_change': f4(sample)*100, # expected 0 - 100 %
+        }
+    
+class SpectroElectroChemistry2(Experiment):
+
+    def __init__(
+            self,
+            action_space=[],
+            inputs={},
+            #cost=2.0+6.0): # best guess is 2 hr and 6/10 difficulty, but this is just a guess
+            cost=8.0+32.0): # temporary while adjusting experiment rewards
+        super().__init__(
+            category='characterization',
+            action_space=action_space,
+            inputs=inputs,
+            cost=cost)
+        
+    def calculate_outputs(self, sample, action):
+        return {
+            'peak_position_change': f8(sample)*100, # expected 0 - 100 nm
+            'peak_width_change': f9(sample)*30, # expected 0 - 30 nm
+            'absorbance_change': f10(sample)*100, # expected 0 - 100 %
         }
 
 
