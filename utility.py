@@ -410,8 +410,10 @@ class CampaignInfo():
             agent = deepcopy(self.agent)
             agent.initialize_GPRs(self.environment)
             agent.initialize_savfs(self.environment)        
-            agent = initial_VSDL_exploration(agent, self.environment, verbose=verbose, **{_[0]:_[1] for _ in  self.sampling_procedure})
-            agent = run_VSDL_campaign(agent, self.environment, **{_[0]:_[1] for _ in  self.sampling_procedure}, verbose=verbose)
+            agent = initial_VSDL_exploration(
+                agent, self.environment, verbose=verbose, **{_[0]:_[1] for _ in  self.sampling_procedure})
+            agent = run_VSDL_campaign(
+                agent, self.environment, verbose=verbose, **{_[0]:_[1] for _ in  self.sampling_procedure})
             if verbose:
                 print('  dumping to output ({})...'.format(datetime.datetime.now()))
             self.dump_to_output(agent=agent, run=run)

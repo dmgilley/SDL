@@ -6,10 +6,7 @@ from sdlabs import material
 import numpy as np
 import sklearn.gaussian_process as GP
 import scipy.stats as sps
-
-
 import linecache
-import os
 import tracemalloc
 
 def display_top(snapshot, key_type='lineno', limit=10):
@@ -38,7 +35,7 @@ def display_top(snapshot, key_type='lineno', limit=10):
 
 class MLStrategy:
     def __init__(self, epsilon, BO_acq_func_name):
-        self.epsilon = epsilon
+        self.epsilon = epsilon # larger epsilon corresponds to stronger exploitation
         self.states = {}
         self.rewards = {}
         self.stabilities = {}
@@ -59,7 +56,7 @@ class MLStrategy:
     def BO_UCB(self, mean, std):
         # Snoeck et al., "Practical Bayesian Optimization of Machine Learning Algorithms"
         fbest = np.max([_ for _ in self.stabilities.values() if type(_) != list])
-        return mean + self.epsilon * std
+        return mean + (1-self.epsilon) * std
 
     def set_BO_acq_func(self, BO_acq_func_name):
         BO_acq_func_map = {
