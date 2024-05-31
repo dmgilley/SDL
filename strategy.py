@@ -1,13 +1,25 @@
 #!/usr/bin/env python3
 
 
-import gc
+import gc, warnings
 from sdlabs import material
+from scipy import optimize
+from copy import deepcopy
 import numpy as np
 import sklearn.gaussian_process as GP
 import scipy.stats as sps
 import linecache
 import tracemalloc
+
+def my_optimizer(obj_func, initial_theta, bounds=(1e-5,1e5)):
+    method='Nelder-Mead'
+    if type(bounds) == tuple:
+        bounds = np.log(np.vstack([bounds]).reshape(-1,2))    
+    def obj_func_wrapper(theta):
+        return obj_func(theta, eval_gradient=False)
+    opt_res = optimize.minimize(obj_func_wrapper, initial_theta, bounds=bounds, method=method)
+    return opt_res.x, opt_res.fun
+
 
 def display_top(snapshot, key_type='lineno', limit=10):
     snapshot = snapshot.filter_traces((
@@ -15,7 +27,6 @@ def display_top(snapshot, key_type='lineno', limit=10):
         tracemalloc.Filter(False, "<unknown>"),
     ))
     top_stats = snapshot.statistics(key_type)
-
     print("Top %s lines" % limit)
     for index, stat in enumerate(top_stats[:limit], 1):
         frame = stat.traceback[0]
@@ -24,7 +35,6 @@ def display_top(snapshot, key_type='lineno', limit=10):
         line = linecache.getline(frame.filename, frame.lineno).strip()
         if line:
             print('    %s' % line)
-
     other = top_stats[limit:]
     if other:
         size = sum(stat.size for stat in other)
@@ -93,25 +103,52 @@ class MLStrategy:
 
 class ArchitectureOne(MLStrategy):
 
-    def __init__(self, discount=0.1, epsilon=0.5, BO_acq_func_name='UCB'):
+    def __init__(self, environment=None,
+            discount=0.1, epsilon=0.5, BO_acq_func_name='UCB',
+            savfs=None, kernel=None, GPRs=None, GPR_dict=None):
         super().__init__(epsilon, BO_acq_func_name)
         self.predicted_stabilities = {}
-        self.savfs = {}
-        self.GPRs = {}
         self.discount = discount
         self.processed_samples = 0
         self.done = False
+        self.environment_added = False
+        self.initialize_savfs(savfs=savfs)
+        self.initialize_GPRs(kernel=kernel, GPRs=GPRs, GPR_dict=GPR_dict)
+        if environment != None:
+            self.add_environment(environment)
 
-    def initialize_savfs(self, environment):
-        self.savfs = {_:(0,0.0) for _ in environment.experiments.keys()}
+    def initialize_savfs(self, savfs=None):
+        setattr(self, 'savfs', savfs)
+        if savfs == None:
+            self.savfs = (0,0.0)
 
-    def initialize_GPRs(self, environment, kernel_type='RBF', kernel_dict={}, GPR_dict={'n_restarts_optimizer':5}):
-        for experiment_name, experiment in environment.experiments.items():
-            if experiment.category == 'stability' or experiment.category == 'turn_back':
-                continue
-            kernel_class = getattr(GP.kernels, kernel_type)
-            kernel = kernel_class(**kernel_dict)
-            self.GPRs[experiment_name] = GP.GaussianProcessRegressor(kernel=kernel, **GPR_dict)
+    def initialize_GPRs(self, kernel=None, GPR_dict=None, GPRs=None):
+        if kernel == None:
+            kernel = GP.kernels.Matern()
+        if GPR_dict == None:
+            GPR_dict = {
+                'kernel': kernel,
+                'alpha': 1e-9,
+                'optimizer': my_optimizer,
+                'n_restarts_optimizer': 10,
+            }
+        if 'kernel' not in GPR_dict.keys():
+            GPR_dict['kernel'] = kernel
+        if GPRs == None:
+            GPRs = GP.GaussianProcessRegressor(**GPR_dict)
+        setattr(self, 'GPRs', GPRs)
+
+    def add_environment(self, environment, overwrite=False):
+        if self.environment_added and not overwrite:
+            warnings.warn('Warning! Tried to add environment to {} instance, but an environment has already been added.'.format(self))
+            return
+        experiment_names = [name for name,exp in environment.experiments.items()]
+        if type(self.savfs) != dict:
+            self.savfs = {k:deepcopy(self.savfs) for k in experiment_names}
+        experiment_names = [name for name,exp in environment.experiments.items() if exp.category not in ['stability','turn_back']]
+        if type(self.GPRs) != dict:
+            self.GPRs = {k:deepcopy(self.GPRs) for k in experiment_names}
+        self.environment_added = True
 
     def reset(self):
         self.sample_number += 1
@@ -164,10 +201,10 @@ class ArchitectureOne(MLStrategy):
             if self.states[sample_number][idx].category == 'characterization']
 
         if state.category == 'processing':
-            #value = stability
+            value = stability
             #value = np.sum([_[0] for _ in predicted_stability_characterizations]) + stability
             #value = np.sum([_[0]-_[1] for _ in predicted_stability_characterizations]) + stability
-            value = np.sum([_[0]-_[1] for _ in predicted_stability_characterizations])/np.max([1,len(predicted_stability_characterizations)]) + stability
+            #value = np.sum([_[0]-_[1] for _ in predicted_stability_characterizations])/np.max([1,len(predicted_stability_characterizations)]) + stability
             #total_unc = np.sum([_[1] for _ in predicted_stability_characterizations])
             #value = np.sum([_[0]*(1-_[1]/total_unc) for _ in predicted_stability_characterizations]) + stability
             #value = np.sum([_[0]*(1-_[1]/_[0]) for _ in predicted_stability_characterizations])/len(predicted_stability_characterizations) + stability

@@ -408,8 +408,9 @@ class CampaignInfo():
             if verbose:
                 print('Run {} ({})'.format(run,datetime.datetime.now()))
             agent = deepcopy(self.agent)
-            agent.initialize_GPRs(self.environment)
-            agent.initialize_savfs(self.environment)        
+            agent.add_environment(self.environment)
+            #agent.initialize_GPRs(self.environment)
+            #agent.initialize_savfs(self.environment)        
             agent = initial_VSDL_exploration(
                 agent, self.environment, verbose=verbose, **{_[0]:_[1] for _ in  self.sampling_procedure})
             agent = run_VSDL_campaign(
