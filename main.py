@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 
 
-import sys, inspect, datetime, json, pickle, argparse
 from sdlabs.utility import *
+from sdlabs.campaign import *
+import sys, argparse
 
 
 def main(argv):
@@ -21,14 +22,14 @@ def main(argv):
     campaign_list = read_campaign_list(args.input_file)
 
     # Run each requested campaign
+    # If MAE is requested, read the data back in from the output file and calculate the MAE
     for campaign in campaign_list:
         campaign.run(verbose=args.verbose)
-
-        # If MAE is requested, read the data back in from the output file and calculate the MAE
         if args.MAE:
-            campaign.run_and_dump_MAE()
+            campaign.calculate_MAE()
 
     return
+
 
 if __name__ == '__main__':
     main(sys.argv[1:])

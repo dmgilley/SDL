@@ -1,52 +1,50 @@
 #!/usr/bin/env python3
 
 
+from typing import *
+
+
 class Action:
 
-    def __init__(self, name, category, parameters={}):
+    def __init__(self, name: str, category: str, inputs: dict = None, outputs: dict = None, reward: float = 0.0) -> None:
         self.name = name
         self.category = category
-        self.parameters = parameters
-
-
-class State:
-
-    def __init__(self, name, category, outputs={}, reward=0.0):
-        self.name = name
-        self.category = category
-        self.outputs = outputs
+        self.inputs = inputs or {}
+        self.outputs = outputs or {}
         self.reward = reward
 
-    def get_outputs(self):
+    def get_outputs(self) -> List[float]:
         return [v for k,v in sorted(self.outputs.items())]
 
 
-class Material:
+class Sample:
 
-    def __init__(self):
-        self.states = []
-        self.stability = 0.0
-        self.closed = False
+    def __init__(self) -> None:
+        self.actions: List[Action] = []
+        self.stability: float = 0.0
+        self.closed: bool = False
 
-    def add_state(self, state):
+    def add_action(self, action: Action) -> None:
+        if len(action.outputs) == 0:
+            raise ValueError("Error! Attempting to add a material.Action instance that has no outputs to a material.Sample instance.")
         if self.closed:
-            print('Error! Attempting to run an experiment on a material that is "closed" (i.e. stability was already measured).')
-            return
-        self.states.append(state)
-        if 'stability' in state.outputs.keys():
-            self.stability = state.outputs['stability']
+            raise ValueError("Error! Attempting to run an experiment on a closed sample.")
+        self.actions.append(action)
+        stability_value = action.outputs.get("stability")
+        if stability_value is not None:
+            self.stability = stability_value
             self.closed = True
-        if state.category == 'turn_back':
+        if action.category == "turn_back":
             self.closed = True
 
-    def pull_outputs(self, state_name, output_names):
-        if type(output_names) == str:
-            output_names = [output_names]
-        outputs = [_.outputs for _ in self.states if _.name == state_name]
-        if not outputs:
-            return [0.0 for _ in output_names]
-        values = [outputs[0].get(_,0.0) for _ in output_names]
-        if len(values) != len(output_names):
-            bad_keys = [_ for _ in output_names if _ not in outputs[0]]
-            print('Warning! Attempting to extract a non-existent output. Requested {} from {}.'.format(','.join(bad_keys),state_name))
+    def pull_outputs(self, action_name: str, requested_output_names: Union[str,List[str]]) -> List[float]:
+        if isinstance(requested_output_names, str):
+            requested_output_names = [requested_output_names]
+        matching_actions = [a.outputs for a in self.actions if a.name == action_name]
+        if not matching_actions:
+            return [0.0] * len(requested_output_names)
+        values = [matching_actions[0].get(output_name, 0.0) for output_name in requested_output_names]
+        if len(values) != len(requested_output_names):
+            missing_keys = [name for name in requested_output_names if name not in matching_actions[0]]
+            print(f"Warning! Attempting to extract non-existent outputs: {', '.join(missing_keys)} from {action_name}.")
         return values

@@ -2,70 +2,112 @@
 
 
 import gc, warnings
-from sdlabs import material
+from sdlabs import material,world
 from scipy import optimize
 from copy import deepcopy
+from typing import *
 import numpy as np
 import sklearn.gaussian_process as GP
 import scipy.stats as sps
-import linecache
-import tracemalloc
-
-def my_optimizer(obj_func, initial_theta, bounds=(1e-5,1e5)):
-    method='Nelder-Mead'
-    if type(bounds) == tuple:
-        bounds = np.log(np.vstack([bounds]).reshape(-1,2))    
-    def obj_func_wrapper(theta):
-        return obj_func(theta, eval_gradient=False)
-    opt_res = optimize.minimize(obj_func_wrapper, initial_theta, bounds=bounds, method=method)
-    return opt_res.x, opt_res.fun
-
-
-def display_top(snapshot, key_type='lineno', limit=10):
-    snapshot = snapshot.filter_traces((
-        tracemalloc.Filter(False, "<frozen importlib._bootstrap>"),
-        tracemalloc.Filter(False, "<unknown>"),
-    ))
-    top_stats = snapshot.statistics(key_type)
-    print("Top %s lines" % limit)
-    for index, stat in enumerate(top_stats[:limit], 1):
-        frame = stat.traceback[0]
-        print("#%s: %s:%s: %.1f KiB"
-              % (index, frame.filename, frame.lineno, stat.size / 1024))
-        line = linecache.getline(frame.filename, frame.lineno).strip()
-        if line:
-            print('    %s' % line)
-    other = top_stats[limit:]
-    if other:
-        size = sum(stat.size for stat in other)
-        print("%s other: %.1f KiB" % (len(other), size / 1024))
-    total = sum(stat.size for stat in top_stats)
-    print("Total allocated size: %.1f KiB" % (total / 1024))
 
 
 class MLStrategy:
-    def __init__(self, epsilon, BO_acq_func_name):
+    def __init__(
+            self,
+            environment: Union[ None, world.VSDLEnvironment ] = None,
+            discount: float = 0.1,
+            epsilon: float = 0.5,
+            optimizer_method: str = 'Nelder-Mead',
+            BO_acq_func_name: str = 'UCB',
+            savf_update_method: str = 'MC',
+            kernel: Union[ None, GP.kernels.Kernel ] = None,
+            GPRs: Union[ None, GP.GaussianProcessRegressor ] = None, 
+            GPR_dict: Union[ None, Dict[str, Union[ int, float, GP.kernels.Kernel ] ] ] = None,
+            savfs: Union[ Tuple[int,float], Dict[str,Tuple[int,float]] ] = (0,0.0)) -> None:
         self.epsilon = epsilon # larger epsilon corresponds to stronger exploitation
-        self.states = {}
-        self.rewards = {}
+        self.discount = discount
+        self.optimizer_method = optimizer_method
+        self.actions = {}
         self.stabilities = {}
-        self.sample_number = 0
+        self.sample_number = 1
+        self.processed_samples = 0
+        self.environment_added = False
+        self.initialize_GPRs(kernel=kernel, GPR_dict=GPR_dict, GPRs=GPRs)
+        self.initialize_savfs(savfs=savfs)
+        if environment != None:
+            self.add_environment(environment)
         self.set_BO_acq_func(BO_acq_func_name)
+        self.set_savf_update_method(savf_update_method)
+
+    def custom_optimizer(self, obj_func, initial_theta, bounds=(1e-5,1e5)):
+        if type(bounds) == tuple:
+            bounds = np.log(np.vstack([bounds]).reshape(-1,2))    
+        def obj_func_wrapper(theta):
+            return obj_func(theta, eval_gradient=False)
+        opt_res = optimize.minimize(obj_func_wrapper, initial_theta, bounds=bounds, method=self.optimizer_method)
+        return opt_res.x, opt_res.fun
+    
+    def initialize_savfs(
+            self,
+            savfs: Union[ Tuple[int,float], Dict[str,Tuple[int,float]]] = (0,0.0),
+            environment: Union[ None, world.VSDLEnvironment ] = None):
+        if not hasattr(self, 'savfs'):
+            setattr(self, 'savfs', savfs)
+        if environment != None and type(self.savfs) != dict:
+            self.savfs = {n:deepcopy(self.savfs) for n in environment.get_experiment_names()}
+        
+    def initialize_GPRs(
+            self,
+            kernel: Union[ None, GP.kernels.Kernel ] = None,
+            GPR_dict: Union[ None, Dict[str, Union[ int, float, GP.kernels.Kernel ]] ] = None,
+            GPRs: Union[ None, GP.GaussianProcessRegressor ] = None, 
+            environment: Union[ None, world.VSDLEnvironment ] = None):
+        if not hasattr(self, 'GPRs'):
+            if kernel == None:
+                kernel = GP.kernels.Matern()
+            if GPR_dict == None:
+                GPR_dict = {
+                    'kernel': kernel,
+                    'alpha': 1e-9,
+                    'n_restarts_optimizer': 10,
+                }
+            if 'kernel' not in GPR_dict.keys():
+                GPR_dict['kernel'] = kernel
+            GPR_dict['optimizer'] = self.custom_optimizer
+            if GPRs == None:
+                GPRs = GP.GaussianProcessRegressor(**GPR_dict)
+            setattr(self, 'GPRs', GPRs)
+        if environment != None and type(self.GPRs) != dict:
+            experiment_names = environment.get_experiment_names(category=['stability','turn_back'], exclude=True)
+            self.GPRs = {tuple([tuple([k]),tuple(['Stability'])]):deepcopy(self.GPRs) for k in experiment_names}
+
+    def add_environment(self, environment: Union[ None, world.VSDLEnvironment ] = None, overwrite: bool = False):
+        if self.environment_added and not overwrite:
+            warnings.warn('Warning! Tried to add environment to {} instance, but an environment has already been added.'.format(self))
+            return
+        self.initialize_savfs(environment=environment)
+        self.initialize_GPRs(environment=environment)
+        setattr(self, 'environment', environment)
+        self.environment_added = True
+
+    def get_unprocessed_sample_numbers(self):
+        return sorted(self.actions.keys())[self.processed_samples:]
 
     def BO_probability_of_improvement(self, mean, std):
         # Snoeck et al., "Practical Bayesian Optimization of Machine Learning Algorithms"
-        fbest = np.max([_ for _ in self.stabilities.values() if type(_) != list])
+        fbest = np.max([alist[-1].outputs['stability'] for alist in self.actions.values() if alist[-1].outputs.get('stability',None) != None])
         return sps.norm.cdf((mean - fbest) / std)
 
     def BO_expected_improvement(self, mean, std):
         # Frazier and Wang, "Bayesian Optimization for Materials Design"
-        fbest = np.max([_ for _ in self.stabilities.values() if type(_) != list])
+        fbest = np.max([alist[-1].outputs['stability'] for alist in self.actions.values() if alist[-1].outputs.get('stability',None) != None])
         gamma = (mean - fbest) / std
         return (mean - fbest) * sps.norm.cdf(gamma) + std * sps.norm.pdf(gamma)
 
     def BO_UCB(self, mean, std):
         # Snoeck et al., "Practical Bayesian Optimization of Machine Learning Algorithms"
-        fbest = np.max([_ for _ in self.stabilities.values() if type(_) != list])
+        #fbest = np.max([_ for _ in self.stabilities.values() if type(_) != list])
+        fbest = np.max([alist[-1].outputs['stability'] for alist in self.actions.values() if alist[-1].outputs.get('stability',None) != None])
         return mean + (1-self.epsilon) * std
 
     def set_BO_acq_func(self, BO_acq_func_name):
@@ -75,189 +117,175 @@ class MLStrategy:
             'UCB': self.BO_UCB,
         }
         if BO_acq_func_name not in BO_acq_func_map:
-            raise ValueError("Invalid BO_acq_func_name specified")
+            raise KeyError("Invalid BO_acq_func_name specified")
         setattr(self, 'BO_acq_func', BO_acq_func_map[BO_acq_func_name])
 
-    def select_action(self, sample, environment):
-        action = material.Action('name', 'category', parameters={})
-        return action
+    def MC_savf_update(self):
+        for sample_number in self.get_unprocessed_sample_numbers():
+            reward_list = [a.reward for a in self.actions[sample_number]]
+            for action_idx,action in enumerate(self.actions[sample_number]):
+                count = self.savfs[action.name][0] + 1
+                Gt = np.sum([(self.discount**reward_idx)*reward for reward_idx,reward in enumerate(reward_list[action_idx:])])
+                new_savf = self.savfs[action.name][1] + (Gt - self.savfs[action.name][1])/(count)
+                self.savfs[action.name] = (count, new_savf)
 
-    def take_action(self, action, sample, environment):
-        outputs = environment.experiments[action.name].calculate_outputs(sample, action)
-        reward = self.calculate_reward(action, outputs)
-        state = material.State(action.name, action.category, outputs=outputs, reward=reward)
-        return state
+    def set_savf_update_method(self, savf_update_method):
+        method_map = {
+            'MC': self.MC_savf_update
+        }
+        if savf_update_method not in method_map:
+            raise KeyError("Invalid savf_update_method specified")
+        setattr(self, 'update_savfs', method_map[savf_update_method])
+
+    def select_action(self, sample: material.Sample) -> material.Action:
+        raise NotImplementedError
+
+    def take_action(self, sample: material.Sample, action: material.Action) -> material.Action:
+        outputs = self.environment.experiments[action.name].calculate_outputs(sample, action)
+        return material.Action(
+            deepcopy(action.name),
+            deepcopy(action.category),
+            outputs={k:v.flatten()[0] for k,v in outputs.items()})
     
-    def calculate_reward(self, action, outputs):
-        return 0.0
-    
-    def update_after_step(self, sample, environment):
-        return None
-    
-    def update_after_sample(self, sample, environment):
-        return None
-
-    def update_after_episode(self, sample, environment):
-        return None
-
-
-class ArchitectureOne(MLStrategy):
-
-    def __init__(self, environment=None,
-            discount=0.1, epsilon=0.5, BO_acq_func_name='UCB',
-            savfs=None, kernel=None, GPRs=None, GPR_dict=None):
-        super().__init__(epsilon, BO_acq_func_name)
-        self.predicted_stabilities = {}
-        self.discount = discount
-        self.processed_samples = 0
-        self.done = False
-        self.environment_added = False
-        self.initialize_savfs(savfs=savfs)
-        self.initialize_GPRs(kernel=kernel, GPRs=GPRs, GPR_dict=GPR_dict)
-        if environment != None:
-            self.add_environment(environment)
-
-    def initialize_savfs(self, savfs=None):
-        setattr(self, 'savfs', savfs)
-        if savfs == None:
-            self.savfs = (0,0.0)
-
-    def initialize_GPRs(self, kernel=None, GPR_dict=None, GPRs=None):
-        if kernel == None:
-            kernel = GP.kernels.Matern()
-        if GPR_dict == None:
-            GPR_dict = {
-                'kernel': kernel,
-                'alpha': 1e-9,
-                'optimizer': my_optimizer,
-                'n_restarts_optimizer': 10,
-            }
-        if 'kernel' not in GPR_dict.keys():
-            GPR_dict['kernel'] = kernel
-        if GPRs == None:
-            GPRs = GP.GaussianProcessRegressor(**GPR_dict)
-        setattr(self, 'GPRs', GPRs)
-
-    def add_environment(self, environment, overwrite=False):
-        if self.environment_added and not overwrite:
-            warnings.warn('Warning! Tried to add environment to {} instance, but an environment has already been added.'.format(self))
-            return
-        experiment_names = [name for name,exp in environment.experiments.items()]
-        if type(self.savfs) != dict:
-            self.savfs = {k:deepcopy(self.savfs) for k in experiment_names}
-        experiment_names = [name for name,exp in environment.experiments.items() if exp.category not in ['stability','turn_back']]
-        if type(self.GPRs) != dict:
-            self.GPRs = {k:deepcopy(self.GPRs) for k in experiment_names}
-        self.environment_added = True
-
-    def reset(self):
+    def update_after_sample(self, sample):
+        self.actions[self.sample_number] = sample.actions
+        self.stabilities[self.sample_number] = [self.predict_stability(action) for action in sample.actions]
+        self.calculate_rewards()
         self.sample_number += 1
-        self.states[self.sample_number] = []
-        self.rewards[self.sample_number] = []
-        self.stabilities[self.sample_number] = []
-        self.predicted_stabilities[self.sample_number] = []
-        self.done = False
 
-    def update_after_sample(self, sample, environment):
-        if sample.states[-1].category == 'turn_back':
-            self.states[self.sample_number] = sample.states
-            self.rewards[self.sample_number] = [_.reward for _ in sample.states]
-            mean, _ = self.predict_stability(sample.states[-2])
-            self.stabilities[self.sample_number] = mean
-            return
-        self.states[self.sample_number] = sample.states
-        self.rewards[self.sample_number] = [_.reward for _ in sample.states]
-        self.stabilities[self.sample_number] = sample.stability
+    def predict_stability(
+            self,
+            action: material.Action,
+            sample_number: Union[None, int] = None,
+            ) -> Tuple[Union[None,float],Union[None,float]]:
+        if sample_number == None:
+            sample_number = self.sample_number
+        if action.category == 'stability':
+            return (action.outputs['stability'].flatten()[0],0.0)
+        if action.category == 'turn_back':
+            return (None,None)
+        ignore_stability_target = False
+        if self.actions[sample_number][-1].category == 'turn_back':
+            ignore_stability_target = True
+        GPR_key_list = [key
+                    for key in self.GPRs.keys()
+                    if action.name in key[0]
+                    and sample_number in self.get_GPR_sample_numbers(key, ignore_stability_target=ignore_stability_target)]
+        GPR_key = max(GPR_key_list, key=len)
+        inputs = self.get_GPR_inputs(GPR_key, [sample_number])
+        mean, std = self.GPRs[GPR_key].predict(inputs, return_std=True)
+        return mean.flatten()[0], std.flatten()[0]
 
-    def update_after_episode(self, sample, environment):
+    def calculate_rewards(self, sample_number: Union[None, int] = None) -> None:
+        if sample_number == None:
+            sample_number = self.sample_number
+        raise NotImplementedError
+
+    def update_after_episode(self):
+        self.update_epsilon()
         self.update_savfs()
         self.update_GPRs()
-        self.processed_samples = len(self.states)
+        self.processed_samples = len(self.actions)
 
-    def update_savfs(self): # RL algorithm dependent
-        for sample_number in sorted(self.states.keys())[self.processed_samples:]:
-            state_list = self.states[sample_number]
-            reward_list = self.rewards[sample_number]
-            for state_idx,state in enumerate(state_list):
-                count = self.savfs[state.name][0] + 1
-                Gt = np.sum([(self.discount**reward_idx)*reward for reward_idx,reward in enumerate(reward_list[state_idx:])])
-                new_savf = self.savfs[state.name][1] + (Gt - self.savfs[state.name][1])/(count)
-                self.savfs[state.name] = (count, new_savf)
-
-    def get_unprocessed_sample_numbers(self):
-        return sorted(self.states.keys())[self.processed_samples:]
+    def update_epsilon(self):
+        return None
     
-    def get_GPR_inputs(self, existing_inputs, state):
-        add_inputs = np.array([state.outputs[k] for k in sorted(state.outputs.keys())]).reshape(1,-1)
-        if existing_inputs is None:
-            return add_inputs
-        return np.append(existing_inputs, add_inputs, axis=0)
+    def update_GPRs(self) -> None:
+        for GPR_key in self.GPRs.keys():
+            sample_numbers = self.get_GPR_sample_numbers(GPR_key)
+            if len(sample_numbers) == 0:
+                return None
+            inputs = self.get_GPR_inputs(GPR_key, sample_numbers)
+            targets = self.get_GPR_targets(GPR_key, sample_numbers)
+            if hasattr(self.GPRs[GPR_key], 'X_train_'):
+                inputs = np.append(self.GPRs[GPR_key].X_train_, inputs, axis=0)
+                targets = np.append(self.GPRs[GPR_key].y_train_, targets, axis=0)
+            self.GPRs[GPR_key].fit(inputs, targets)
+
+    def get_GPR_sample_numbers(
+            self,
+            GPR_key: Tuple[Tuple[str], Tuple[str]],
+            ignore_stability_target: bool = False
+            ) -> List[int]:
+        input_names = deepcopy(GPR_key[0])
+        target_names = deepcopy(GPR_key[1])
+        if ignore_stability_target:
+            target_names = tuple([exp_name for exp_name in target_names if exp_name != 'Stability'])
+        return [sam_num
+                for sam_num in self.get_unprocessed_sample_numbers()
+                if  np.all(np.isin( input_names,[a.name for a in self.actions[sam_num]]))
+                and np.all(np.isin(target_names,[a.name for a in self.actions[sam_num]]))]
     
-    def get_GPR_targets(self, existing_targets, sample_number, state):
+    def get_GPR_inputs(
+            self,
+            GPR_key: Tuple[Tuple[str], Tuple[str]],
+            sample_numbers: List[int]) -> np.ndarray:
+        inputs = []
+        for sam_num in sample_numbers:
+            temp_map = {action.name:idx for idx,action in enumerate(self.actions[sam_num])}
+            action_idxs = [temp_map[name] for name in GPR_key[0]]
+            inputs.append([_ for l in [self.actions[sam_num][idx].get_outputs() for idx in action_idxs] for _ in l])
+        return np.array(inputs).reshape(len(sample_numbers),-1)
+
+    def get_GPR_targets(
+            self,
+            GPR_key: Tuple[Tuple[str], Tuple[str]],
+            sample_numbers: List[int]) -> np.ndarray:
+        targets = []
+        for sam_num in sample_numbers:
+            temp_map = {action.name:idx for idx,action in enumerate(self.actions[sam_num])}
+            action_idxs = [temp_map[name] for name in GPR_key[1]]
+            targets.append([_ for l in [self.actions[sam_num][idx].get_outputs() for idx in action_idxs] for _ in l])
+        return np.array(targets).reshape(len(sample_numbers),-1)
+
+
+class BO1(MLStrategy):
+
+    def __init__(
+            self,
+            environment: Union[ None, world.VSDLEnvironment ] = None,
+            discount: float = 0.1,
+            epsilon: float = 0.5,
+            optimizer_method: str = 'Nelder-Mead',
+            BO_acq_func_name: str = 'UCB',
+            savf_update_method: str = 'MC',
+            kernel: Union[ None, GP.kernels.Kernel ] = None,
+            GPRs: Union[ None, GP.GaussianProcessRegressor ] = None, 
+            GPR_dict: Union[ None, Dict[str, Union[ int, float, GP.kernels.Kernel ] ] ] = None,
+            savfs: Union[ Tuple[int,float], Dict[str,Tuple[int,float]] ] = (0,0.0)) -> None:
+
+        super().__init__(
+            environment=environment,
+            discount=discount,
+            epsilon=epsilon,
+            optimizer_method=optimizer_method,
+            BO_acq_func_name=BO_acq_func_name,
+            savf_update_method=savf_update_method,
+            kernel=kernel,
+            GPRs=GPRs,
+            GPR_dict=GPR_dict,
+            savfs=savfs)
         
-        stability = self.stabilities[sample_number]
-        predicted_stability_characterizations = [
-            _ for idx,_ in enumerate(self.predicted_stabilities[sample_number])
-            if self.states[sample_number][idx].category == 'characterization']
+    def update_epsilon(self):
+        self.epsilon = np.min([ 0.90, self.epsilon + np.abs(0.2*self.epsilon) ])
+        return
 
-        if state.category == 'processing':
-            value = stability
-            #value = np.sum([_[0] for _ in predicted_stability_characterizations]) + stability
-            #value = np.sum([_[0]-_[1] for _ in predicted_stability_characterizations]) + stability
-            #value = np.sum([_[0]-_[1] for _ in predicted_stability_characterizations])/np.max([1,len(predicted_stability_characterizations)]) + stability
-            #total_unc = np.sum([_[1] for _ in predicted_stability_characterizations])
-            #value = np.sum([_[0]*(1-_[1]/total_unc) for _ in predicted_stability_characterizations]) + stability
-            #value = np.sum([_[0]*(1-_[1]/_[0]) for _ in predicted_stability_characterizations])/len(predicted_stability_characterizations) + stability
-
-            add_targets = np.array([value]).reshape(1,-1)
-            if existing_targets is None:
-                return add_targets
-            return np.append(existing_targets, add_targets, axis=0)
-        
-        if state.category == 'characterization':
-            add_targets = np.array([stability]).reshape(1,-1)
-            if existing_targets is None:
-                return add_targets
-            return np.append(existing_targets, add_targets, axis=0)
-        
-        if state.category == 'stability':
-            add_targets = np.array([None]).reshape(1,-1)
-            if existing_targets is None:
-                return add_targets
-            return np.append(existing_targets, add_targets, axis=0)
-            
-
-    def update_GPRs(self):
-        for state_name in self.GPRs.keys():
-            new_inputs, new_targets = None, None
-            for sample_number in self.get_unprocessed_sample_numbers():
-                state = {_.name:_ for _ in self.states[sample_number]}.get(state_name,None)
-                if not state: continue
-                new_inputs = self.get_GPR_inputs(new_inputs, state)
-                new_targets = self.get_GPR_targets(new_targets, sample_number, state)
-            if new_inputs is None: continue
-            if hasattr(self.GPRs[state_name], 'X_train_'):
-                new_inputs = np.append(self.GPRs[state_name].X_train_, new_inputs, axis=0)
-                new_targets = np.append(self.GPRs[state_name].y_train_, new_targets, axis=0)
-            self.GPRs[state_name].fit(new_inputs, new_targets)
-            del new_inputs,new_targets
-            gc.collect()
-
-    def select_action(self, sample, environment):
-        action_space = environment.get_action_space(sample)
-        if not sample.states:
-            action = self.BO_selection(action_space, environment)
+    def select_action(self, sample: material.Sample) -> material.Action:
+        action_space = self.environment.get_action_space(sample)
+        if not sample.actions:
+            action = self.BO_selection(action_space)
         else:
-            action = self.RL_selection(action_space, environment)
+            action = self.RL_selection(action_space)
         if action.category == 'stability' or action.category == 'turn_back':
             self.done = True
         return action
 
-    def BO_selection(self, action_space, environment):
+    def BO_selection(self, action_space):
         best = (None,{},-np.inf) # experiment name, {input labels:input values}, acq func value
         for experiment_name in action_space:
-            for input_labels,input_values in environment.experiments[experiment_name].yield_input_spaces():
-                mean, std = self.GPRs[experiment_name].predict(input_values, return_std=True)
+            GPR_key = tuple([tuple([experiment_name]),tuple(['Stability'])])
+            for input_labels,input_values in self.environment.experiments[experiment_name].yield_input_spaces():
+                mean, std = self.GPRs[GPR_key].predict(input_values, return_std=True)
                 mean = mean.reshape(-1,1)
                 std = std.reshape(-1,1)
                 acq_func_output = self.BO_acq_func(mean,std)
@@ -267,64 +295,47 @@ class ArchitectureOne(MLStrategy):
                     best = (
                         experiment_name,
                         {var:input_values[max_idx,var_idx] for var_idx,var in enumerate(input_labels)},
-                        max_val
-                        )
-                del input_values
-                gc.collect()
+                        max_val)
         return material.Action(
             best[0],
-            environment.experiments[best[0]].category,
-            parameters=best[1]
+            self.environment.experiments[best[0]].category,
+            inputs=best[1]
             )
 
-    def RL_selection(self, actions, environment):
+    def RL_selection(self, actions):
         if np.random.rand() > self.epsilon:
-            return self.RL_explore(actions, environment)
+            action = np.random.choice(actions)
+            return material.Action(
+                action,
+                self.environment.experiments[action].category)
         else:
-            return self.RL_exploit(actions, environment)
+            temp_savfs = {_:self.savfs[_][1] for _ in actions}
+            action = max(temp_savfs, key=temp_savfs.get)
+            return material.Action(
+                action,
+                self.environment.experiments[action].category)
 
-    def RL_explore(self, actions, environment):
-        action = np.random.choice(actions)
-        return material.Action(
-            action,
-            environment.experiments[action].category
-            )
+    def calculate_rewards(self, sample_number: Union[None, int] = None) -> None:
 
-    def RL_exploit(self, actions, environment):
-        temp_savfs = {_:self.savfs[_][1] for _ in actions}
-        action = max(temp_savfs, key=temp_savfs.get)
-        return material.Action(
-            action,
-            environment.experiments[action].category
-            )
-    
-    def take_action(self, action, sample, environment):
-        outputs = environment.experiments[action.name].calculate_outputs(sample, action)
-        faux_reward = 0.0
-        state = material.State(action.name, action.category, outputs=outputs, reward=faux_reward)
-        if action.name != 'Stability' and action.category != 'turn_back':
-            mean, std = self.predict_stability(state)
-        elif action.category == 'turn_back':
-            mean, std = self.predicted_stabilities[self.sample_number][-1]
-        else:
-            mean, std = outputs['stability'], 0.0
-        self.predicted_stabilities[self.sample_number].append((mean,std))
-        state.reward = self.calculate_reward(action, sample, environment)
-        return state
-    
-    def predict_stability(self, state):
-        X = np.array([v for k,v in sorted(state.outputs.items())]).reshape(1,-1)
-        temp = self.GPRs[state.name].predict(X,return_std=True)
-        return (temp[0].flatten()[0], temp[1].flatten()[0])
+        if sample_number == None:
+            sample_number = self.sample_number
 
-    def calculate_reward(self, action, sample, environment):
-        if action.category == 'turn_back':
-            mean, std = self.predicted_stabilities[self.sample_number][-1]
-            return -std/mean*100
-        if len(self.predicted_stabilities[self.sample_number]) < 2:
-            return -environment.experiments[action.name].cost
-        pred_stab = self.predicted_stabilities[self.sample_number]
-        deltaRSD = 0
-        if not 0 in [pred_stab[_][0] for _ in [-2,-1]]:
-            deltaRSD = (pred_stab[-2][1]/pred_stab[-2][0]) - (pred_stab[-1][1]/pred_stab[-1][0])
-        return 100*deltaRSD - environment.experiments[action.name].cost
+        mean_stabilities = [_[0] for _ in self.stabilities[sample_number]]
+        std_stabilities =  [_[1] for _ in self.stabilities[sample_number]]
+        
+        for action_idx,action in enumerate(self.actions[sample_number]):
+
+            if action.category == 'turn_back':
+                self.actions[sample_number][action_idx].reward = 100*std_stabilities[-2]/mean_stabilities[-2]
+                continue
+
+            if action.category == 'processing':
+                self.actions[sample_number][action_idx].reward = -self.environment.experiments[action.name].cost
+                continue
+
+            deltaRSD = 0
+            mean_stabilities_1 = [mean_stabilities[action_idx-1], mean_stabilities[action_idx]]
+            std_stabilities_1 = [std_stabilities[action_idx-1], std_stabilities[action_idx]]
+            if 0 not in mean_stabilities_1:
+                deltaRSD = (std_stabilities_1[0]/mean_stabilities_1[0]) - (std_stabilities_1[1]/mean_stabilities_1[1])
+            self.actions[sample_number][action_idx].reward = 100*deltaRSD - self.environment.experiments[action.name].cost

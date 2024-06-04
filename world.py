@@ -1,8 +1,7 @@
 #!/usr/bin/env python3
 
 
-from sdlabs import material
-from sdlabs.utility import parse_function_inputs
+from sdlabs.utility import *
 import numpy as np
 from itertools import product
 
@@ -84,28 +83,28 @@ def g2(inputs):
 
 class Experiment:
 
-    def __init__(self, category='base_class', action_space=[], inputs={}, cost=0.0):
+    def __init__(self, category='base_class', action_space=[], parameters={}, cost=0.0):
         self.category = category
         self.action_space = action_space
-        self.inputs = inputs
+        self.parameters = parameters
         self.cost = cost
 
-    def calculate_outputs(self, material, action):
+    def calculate_outputs(self, sample, action):
         return None
 
     def get_input_space(self, length=20):
-        if not self.inputs:
+        if not self.parameters:
             return None
-        input_labels = sorted(list(self.inputs.keys()))
-        input_ranges = [np.linspace(self.inputs[_][0], self.inputs[_][1], num=length) for _ in input_labels]
+        input_labels = sorted(list(self.parameters.keys()))
+        input_ranges = [np.linspace(self.parameters[_][0], self.parameters[_][1], num=length) for _ in input_labels]
         input_values = np.array(np.meshgrid(*input_ranges)).T.reshape(-1,len(input_ranges))
         return (input_labels, input_values)
     
-    def yield_input_spaces(self, length=50, chunk_size=25):
-        if not self.inputs:
+    def yield_input_spaces(self, length=30, chunk_size=30):
+        if not self.parameters:
             return None
-        input_labels = sorted(list(self.inputs.keys()))
-        input_ranges = [np.linspace(self.inputs[_][0], self.inputs[_][1], num=length) for _ in input_labels]
+        input_labels = sorted(list(self.parameters.keys()))
+        input_ranges = [np.linspace(self.parameters[_][0], self.parameters[_][1], num=length) for _ in input_labels]
         indices = [range(0, len(sublist), chunk_size) for sublist in input_ranges]
         for indexes in product(*indices):
             subranges = [sublist[idx:idx+chunk_size] for sublist, idx in zip(input_ranges, indexes)]
@@ -118,7 +117,7 @@ class BladeCoat(Experiment):
     def __init__(
             self,
             action_space=[],
-            inputs={
+            parameters={
                 'coating_temperature': [0.0,500.0], # C
                 'speed': [1.0,20.0], # mm/s
                 'solvent_to_polymer_ratio': [0.0,1.0],
@@ -131,11 +130,11 @@ class BladeCoat(Experiment):
         super().__init__(
             category='processing',
             action_space=action_space,
-            inputs=inputs,
+            parameters=parameters,
             cost=cost)
         
     def calculate_outputs(self, sample, action):
-        return action.parameters
+        return action.inputs
 
 
 class SpinCoat(Experiment):
@@ -143,7 +142,7 @@ class SpinCoat(Experiment):
     def __init__(
             self,
             action_space=[],
-            inputs={
+            parameters={
                 'coating_temperature': [0.0,500.0], # C
                 'speed': [500.0,5000.0], # rpm
                 'solvent_to_polymer_ratio': [0.0,1.0],
@@ -156,11 +155,11 @@ class SpinCoat(Experiment):
         super().__init__(
             category='processing',
             action_space=action_space,
-            inputs=inputs,
+            parameters=parameters,
             cost=cost)
         
     def calculate_outputs(self, sample, action):
-        return action.parameters
+        return action.inputs
     
 
 class RamanSpectroscopy(Experiment):
@@ -168,13 +167,13 @@ class RamanSpectroscopy(Experiment):
     def __init__(
             self,
             action_space=[],
-            inputs={},
+            parameters={},
             #cost=1.2): # for now, assume same as UV/Vis
             cost=1.0+4.0): # temporary while adjusting experiment rewards
         super().__init__(
             category='characterization',
             action_space=action_space,
-            inputs=inputs,
+            parameters=parameters,
             cost=cost)
         
     def calculate_outputs(self, sample, action):
@@ -188,13 +187,13 @@ class UVVisSpectroscopy(Experiment):
     def __init__(
             self,
             action_space=[],
-            inputs={},
+            parameters={},
             #cost=0.16+1.0): # 10 min and 1/10 difficulty
             cost=1.0+4.0): # temporary while adjusting experiment rewards
         super().__init__(
             category='characterization',
             action_space=action_space,
-            inputs=inputs,
+            parameters=parameters,
             cost=cost)
         
     def calculate_outputs(self, sample, action):
@@ -209,13 +208,13 @@ class UVVisSpectroscopy2(Experiment):
     def __init__(
             self,
             action_space=[],
-            inputs={},
+            parameters={},
             #cost=0.16+1.0): # 10 min and 1/10 difficulty
             cost=1.0+4.0): # temporary while adjusting experiment rewards
         super().__init__(
             category='characterization',
             action_space=action_space,
-            inputs=inputs,
+            parameters=parameters,
             cost=cost)
         
     def calculate_outputs(self, sample, action):
@@ -231,13 +230,13 @@ class EQCM(Experiment):
     def __init__(
             self,
             action_space=[],
-            inputs={},
+            parameters={},
             #cost=13.0+8.0): # 13 hr and 8/10 difficulty
             cost=1.0+4.0): # temporary while adjusting experiment rewards
         super().__init__(
             category='characterization',
             action_space=action_space,
-            inputs=inputs,
+            parameters=parameters,
             cost=cost)
         
     def calculate_outputs(self, sample, action):
@@ -251,12 +250,12 @@ class CV(Experiment):
     def __init__(
             self,
             action_space=[],
-            inputs={},
+            parameters={},
             cost=1.0+4.0): # best guess is 1 hr and 4/10 difficulty, but this is just a guess
         super().__init__(
             category='characterization',
             action_space=action_space,
-            inputs=inputs,
+            parameters=parameters,
             cost=cost)
         
     def calculate_outputs(self, sample, action):
@@ -270,13 +269,13 @@ class SpectroElectroChemistry(Experiment):
     def __init__(
             self,
             action_space=[],
-            inputs={},
+            parameters={},
             #cost=2.0+6.0): # best guess is 2 hr and 6/10 difficulty, but this is just a guess
             cost=8.0+32.0): # temporary while adjusting experiment rewards
         super().__init__(
             category='characterization',
             action_space=action_space,
-            inputs=inputs,
+            parameters=parameters,
             cost=cost)
         
     def calculate_outputs(self, sample, action):
@@ -291,13 +290,13 @@ class SpectroElectroChemistry2(Experiment):
     def __init__(
             self,
             action_space=[],
-            inputs={},
+            parameters={},
             #cost=2.0+6.0): # best guess is 2 hr and 6/10 difficulty, but this is just a guess
             cost=8.0+32.0): # temporary while adjusting experiment rewards
         super().__init__(
             category='characterization',
             action_space=action_space,
-            inputs=inputs,
+            parameters=parameters,
             cost=cost)
         
     def calculate_outputs(self, sample, action):
@@ -313,13 +312,13 @@ class AFM(Experiment):
     def __init__(
             self,
             action_space=[],
-            inputs={},
+            parameters={},
             #cost=12.0+6.0): # 30 min to 1 day, 6/10 difficulty
             cost=1.0+4.0): # temporary while adjusting experiment rewards
         super().__init__(
             category='characterization',
             action_space=action_space,
-            inputs=inputs,
+            parameters=parameters,
             cost=cost)
         
     def calculate_outputs(self, sample, action):
@@ -335,13 +334,13 @@ class GIWAXS(Experiment):
     def __init__(
             self,
             action_space=[],
-            inputs={},
+            parameters={},
             #cost=1.0+4.0): # 1 hr, 5/10 difficulty, total guess
             cost=1.0+4.0): # temporary while adjusting experiment rewards
         super().__init__(
             category='characterization',
             action_space=action_space,
-            inputs=inputs,
+            parameters=parameters,
             cost=cost)
         
     def calculate_outputs(self, sample, action):
@@ -353,11 +352,11 @@ class GIWAXS(Experiment):
 
 class Stability(Experiment):
 
-    def __init__(self, action_space=[], inputs={}, cost=0.0, stability_calc=g1):
+    def __init__(self, action_space=[], parameters={}, cost=5.0, stability_calc=g1):
         super().__init__(
             category='stability',
             action_space=action_space,
-            inputs=inputs,
+            parameters=parameters,
             cost=cost,
             )
         self.stability_calc=stability_calc
@@ -371,16 +370,16 @@ class Stability(Experiment):
 
 class TurnBack(Experiment):
 
-    def __init__(self, action_space=[], inputs={}, cost=0.0):
+    def __init__(self, action_space=[], parameters={}, cost=0.0):
         super().__init__(
             category='turn_back',
             action_space=action_space,
-            inputs=inputs,
+            parameters=parameters,
             cost=cost,
             )
         
     def calculate_outputs(self, sample, action):
-        return {'None':None}
+        return {'None': np.array([0.0])}
 
 
 class VSDLEnvironment:
@@ -400,21 +399,24 @@ class VSDLEnvironment:
             self.experiments[experiment.__class__.__name__] = experiment
 
     def get_action_space(self, sample):
-        if not sample.states:
-            return sorted([k for k,v in self.experiments.items() if v.category == 'processing'])
-        for name,experiment in self.experiments.items():
-            if name == sample.states[-1].name:
-                action_space = [_ for _ in experiment.action_space if _ not in [i.name for i in sample.states]]
-                continue
-        if sample.states[-1].category == 'stability':
+        if not sample.actions:
+            return self.get_experiment_names(category='processing')
+        last_action = sample.actions[-1]
+        experiment = self.experiments.get(last_action.name, None)
+        if experiment == None:
+            raise KeyError("Error! The name of the sample's last action isn't listed in the environment's experiments.")
+        action_space = [_ for _ in experiment.action_space if _ not in [i.name for i in sample.actions]]
+        if last_action.category == 'stability':
             if len(action_space) != 0:
-                print('Error! Last experiment was a stability measurement, but VSDLEnvironment.get_actions() is attempting to return a non-empty list.')
-                return None
+                raise ValueError('Error! Last experiment was a stability measurement, but world.VSDLEnvironment.get_action_space() is attempting to return a non-empty list.')
             print('Warning! Getting action space for a material that has had stability performed.')
         return action_space
     
-    def get_all_experiments(self):
-        return sorted(list(self.experiments.keys()))
-    
-    def get_experiment_names(self, category=''):
-        return sorted([k for k,v in self.experiments.items() if v.category == category])
+    def get_experiment_names(self, category: Union[str, List[str]] = 'all', exclude: bool = False) -> List[str]:
+        if category == 'all':
+            category = sorted(list(set([exp.category for exp in self.experiments.values()])))
+        elif type(category) == str:
+            category = [category]
+        if exclude:
+            return sorted([k for k,v in self.experiments.items() if v.category not in category])
+        return sorted([k for k,v in self.experiments.items() if v.category in category])
