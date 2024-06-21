@@ -7,6 +7,7 @@ import json, pickle, linecache, tracemalloc
 import numpy as np
 from copy import deepcopy
 from typing import *
+from json import JSONEncoder
 from sdlabs import material
 
 
@@ -45,26 +46,6 @@ def display_top(snapshot, key_type='lineno', limit=10):
 
 ###################################################################################################
 # File reading and writing
-def make_jsonable(obj):
-    try:
-        json.dumps(obj)
-        return obj
-    except:
-        try:
-            json.dumps(obj.__dict__)
-            return obj.__dict__
-        except:
-            return 'Not jsonable ({})'.format(type(obj))
-        
-
-def is_jsonable(obj):
-    try:
-        json.loads(obj)
-        return obj
-    except:
-        return None
-
- 
 def pickleLoader(pklFile):
     try:
         while True:

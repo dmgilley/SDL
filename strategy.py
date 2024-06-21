@@ -269,6 +269,30 @@ class BO1(MLStrategy):
     def update_epsilon(self):
         self.epsilon = np.min([ 0.90, self.epsilon + np.abs(0.2*self.epsilon) ])
         return
+    
+    def get_processing_actions(self, number_of_samples=1):
+        best = []
+        for experiment_name in self.environment.get_experiment_names(category='processing'):
+            GPR_key = tuple([tuple([experiment_name]),tuple(['Stability'])])
+            for input_labels,input_values in self.environment.experiments[experiment_name].yield_input_spaces():
+                mean, std = self.GPRs[GPR_key].predict(input_values, return_std=True)
+                mean = mean.reshape(-1,1)
+                std = std.reshape(-1,1)
+                acq_func_output = self.BO_acq_func(mean,std)
+                best = sorted(
+                    [(acq_func_output[idx][0],
+                         input_labels,
+                         input_values[idx],
+                         experiment_name) for idx in range(len(input_values))] + best,
+                    key = lambda x: x[0],
+                    reverse=True)[:number_of_samples]
+        return [
+            material.Action(
+                _[3],
+                self.environment.experiments[_[3]].category,
+                {variable_name:_[2][variable_idx] for variable_idx,variable_name in enumerate(_[1])}
+            )
+            for _ in best]
 
     def select_action(self, sample: material.Sample) -> material.Action:
         action_space = self.environment.get_action_space(sample)

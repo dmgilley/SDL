@@ -80,6 +80,9 @@ def g1(inputs):
 def g2(inputs):
     return 6000/4*( f1(inputs) + f8(inputs) + f9(inputs) + f10(inputs) )
 
+def g3(inputs):
+    return 6000/3*( f2(inputs) + f3(inputs) + f4(inputs) )
+
 
 class Experiment:
 
@@ -100,7 +103,7 @@ class Experiment:
         input_values = np.array(np.meshgrid(*input_ranges)).T.reshape(-1,len(input_ranges))
         return (input_labels, input_values)
     
-    def yield_input_spaces(self, length=30, chunk_size=30):
+    def yield_input_spaces(self, length=15, chunk_size=15):
         if not self.parameters:
             return None
         input_labels = sorted(list(self.parameters.keys()))
@@ -326,6 +329,27 @@ class AFM(Experiment):
             'RMS_surface_roughness': f2(sample), # expected 0 - 50 nm
             'phase_angle': f4(sample), # expected -90 to 90 degrees
             'pore_size': f6(sample), # expected 0 - 1500 nm
+        }
+    
+class AFM2(Experiment):
+
+    def __init__(
+            self,
+            action_space=[],
+            parameters={},
+            #cost=12.0+6.0): # 30 min to 1 day, 6/10 difficulty
+            cost=1.0+4.0): # temporary while adjusting experiment rewards
+        super().__init__(
+            category='characterization',
+            action_space=action_space,
+            parameters=parameters,
+            cost=cost)
+        
+    def calculate_outputs(self, sample, action):
+        return {
+            'RMS_surface_roughness': np.array(np.random.rand()*50), # expected 0 - 50 nm
+            'phase_angle': np.array(np.random.rand()*180-90), # expected -90 to 90 degrees
+            'pore_size': np.array(np.random.rand()*1500), # expected 0 - 1500 nm
         }
 
 

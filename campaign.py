@@ -4,9 +4,9 @@
 ###################################################################################################
 # Imports
 from sdlabs import material,world,strategy
-from sdlabs.analysis import OutputData,read_output
+from sdlabs.analysis import OutputData
 from sdlabs.utility import *
-import datetime, inspect, gc
+import datetime, inspect, gc, pickle
 import sklearn as skl
 import sklearn.gaussian_process as GP
 from typing import *
@@ -51,72 +51,33 @@ def get_cumulative_MAE(data,run,reference_inputs,reference_targets,GPRbase=None)
 
 ###################################################################################################
 # Data writing
-def dump_to_output(
+def dump_to_pkl_output(
         filename: str,
         environment: world.VSDLEnvironment,
         agent: strategy.MLStrategy,
         initial_datapoints_per_parameter: int,
         number_of_batches: int,
         samples_per_batch: int,
-        run: Union[None, int] = None
+        run: Union[None, int] = None,
         ) -> None:
-    
+
     if run == None:
-        with open(filename,'w') as f:
-
-            # Metadata
-            f.write('Written {}\n\n'.format(datetime.datetime.now()))
-
-            # Sampling Procedure
-            f.write('~ SamplingProcedure ~\n\n')
-            f.write('  Initial Datapoints per Processing Parameter: {}\n'.format(initial_datapoints_per_parameter))
-            f.write('  Number of Batches: {}\n'.format(number_of_batches))
-            f.write('  Samples per Batch: {}\n\n'.format(samples_per_batch))
-
-            # Environment
-            f.write('~ Environment ~\n\n')
-            for experiment in [environment.experiments[name] for name in environment.get_experiment_names()]:
-                f.write('  Class Name -- {}\n'.format(experiment.__class__.__name__))
-                f.write('  Category -- {}\n'.format(experiment.category))
-                f.write('  Action Space -- {}\n'.format(experiment.action_space))
-                f.write('  Parameters -- {}\n'.format(experiment.parameters))
-                f.write('  Cost -- {}\n'.format(experiment.cost))
-                f.write('{}\n\n'.format(inspect.getsource(experiment.calculate_outputs)))
-
-            # Agent
-            f.write('~ Agent ~\n\n')
-            f.write('  discount -- {}\n'.format(agent.discount))
-            f.write('  epsilon -- {}\n'.format(agent.epsilon))
-
-        return
-
+        timestamp = "written {}".format(datetime.datetime.now())
+        sampling_procedure = [
+            ("initial_datapoints_per_parameter",initial_datapoints_per_parameter),
+            ("number_of_batches",number_of_batches),
+            ("samples_per_batch",samples_per_batch),
+            ]
+        with open(filename, 'wb') as f:
+            pickle.dump(["timestamp",timestamp], f)
+            pickle.dump(["sampling_procedure",sampling_procedure],f)
+            pickle.dump(["environment",environment],f)
+            pickle.dump(["agent",agent],f)
+    
     elif run:
-        with open(filename,'a') as f:
-
-            f.write('\n\n~ Run ~\n\n')
-            f.write('  {}\n'.format(run))
-            
-            # Results
-            for k,v in sorted(agent.__dict__.items()):
-
-                if k.lower() in ['actions']:
-                    f.write('\n')
-                    f.write('~ {} ~\n\n'.format(k.capitalize()))
-                    for sample in sorted(v.keys()):
-                        f.write('  {} {}\n'.format(sample,json.dumps([_.__dict__ for _ in v[sample]],sort_keys=True)))
-
-                if k.lower() in ['stabilities','savfs']:
-                    f.write('\n')
-                    f.write('~ {} ~\n\n'.format(k.capitalize()))
-                    for key in sorted(v.keys()):
-                        f.write('  {} {}\n'.format(key,json.dumps(v[key],sort_keys=True)))
-
-                if k.lower() in ['gprs']:
-                    f.write('\n')
-                    f.write('~ {} ~\n\n'.format(k.capitalize()))
-                    for name in sorted(v.keys()):
-                        temp_dict = {prop:make_jsonable(deepcopy(val)) for prop,val in v[name].__dict__.items()}
-                        f.write('  {} {}\n'.format(name,json.dumps(temp_dict)))
+        with open(filename,'ab') as f:
+            pickle.dump(["run",run],f)
+            pickle.dump(["agent",agent],f)
 
     return
 
@@ -145,8 +106,8 @@ class Campaign():
         self.samples_per_batch = samples_per_batch
     
     def run(self, verbose=False):
-        dump_to_output(
-            self.name + '.out.txt', # filename
+        dump_to_pkl_output(
+            self.name + '.out.pkl', # filename
             self.environment, # environment
             self.agent_base, # base agent used; this is pre-campaign info
             run = None,
@@ -160,8 +121,8 @@ class Campaign():
             self.agent = deepcopy(self.agent_base)
             self.initial_VSDL_exploration(verbose=verbose)
             self.run_campaign(verbose=verbose)
-            dump_to_output(
-                self.name + '.out.txt', # filename
+            dump_to_pkl_output(
+                self.name + '.out.pkl', # filename
                 self.environment, # environment
                 self.agent, # dump final agent information
                 run=run,
@@ -200,10 +161,13 @@ class Campaign():
         for batch in range(1,self.number_of_batches+1):
             if verbose:
                 print('\n  running batch {} ({})...'.format(batch,datetime.datetime.now()))
-            for sample in range(1,self.samples_per_batch+1):
+            processing_actions = self.agent.get_processing_actions(number_of_samples=self.samples_per_batch)
+            for sample_idx in range(self.samples_per_batch):
                 if verbose:
-                    print('    running sample {} ({})...'.format(sample,datetime.datetime.now()))
+                    print('    running sample {} ({})...'.format(sample_idx+1,datetime.datetime.now()))
                 sample = material.Sample()
+                action = self.agent.take_action(sample, processing_actions[sample_idx])
+                sample.add_action(action)
                 while not sample.closed:
                     selected_action = self.agent.select_action(sample)
                     action = self.agent.take_action(sample, selected_action)
