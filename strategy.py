@@ -17,6 +17,7 @@ class MLStrategy:
             environment: Union[ None, world.VSDLEnvironment ] = None,
             discount: float = 0.1,
             epsilon: float = 0.5,
+            include_MAE: bool = False,
             optimizer_method: str = 'Nelder-Mead',
             BO_acq_func_name: str = 'UCB',
             savf_update_method: str = 'MC',
@@ -26,6 +27,7 @@ class MLStrategy:
             savfs: Union[ Tuple[int,float], Dict[str,Tuple[int,float]] ] = (0,0.0)) -> None:
         self.epsilon = epsilon # larger epsilon corresponds to stronger exploitation
         self.discount = discount
+        self.include_MAE = include_MAE
         self.optimizer_method = optimizer_method
         self.actions = {}
         self.stabilities = {}
@@ -38,6 +40,7 @@ class MLStrategy:
             self.add_environment(environment)
         self.set_BO_acq_func(BO_acq_func_name)
         self.set_savf_update_method(savf_update_method)
+        self.initialize_MAE()
 
     def custom_optimizer(self, obj_func, initial_theta, bounds=(1e-5,1e5)):
         if type(bounds) == tuple:
@@ -47,6 +50,17 @@ class MLStrategy:
         opt_res = optimize.minimize(obj_func_wrapper, initial_theta, bounds=bounds, method=self.optimizer_method)
         return opt_res.x, opt_res.fun
     
+    def initialize_MAE(self):
+        if not self.environment_added: # this catches when the MLStrategy is initialized without an environment
+            return
+        if self.include_MAE == False:
+            setattr(self, 'MAE', None)
+            return
+        setattr(self, 'MAE', {})
+        for p_exp_n in self.environment.get_experiment_names(category='processing'):
+            self.MAE[tuple([tuple([p_exp_n]),tuple(['Stability'])])] = []
+        return
+        
     def initialize_savfs(
             self,
             savfs: Union[ Tuple[int,float], Dict[str,Tuple[int,float]]] = (0,0.0),
@@ -89,9 +103,13 @@ class MLStrategy:
         self.initialize_GPRs(environment=environment)
         setattr(self, 'environment', environment)
         self.environment_added = True
+        self.initialize_MAE()
 
-    def get_unprocessed_sample_numbers(self):
-        return sorted(self.actions.keys())[self.processed_samples:]
+    def get_sample_numbers(self, unprocessed_only=True):
+        starting_idx = 0
+        if unprocessed_only:
+            starting_idx = self.processed_samples
+        return sorted(self.actions.keys())[starting_idx:]
 
     def BO_probability_of_improvement(self, mean, std):
         # Snoeck et al., "Practical Bayesian Optimization of Machine Learning Algorithms"
@@ -106,7 +124,6 @@ class MLStrategy:
 
     def BO_UCB(self, mean, std):
         # Snoeck et al., "Practical Bayesian Optimization of Machine Learning Algorithms"
-        #fbest = np.max([_ for _ in self.stabilities.values() if type(_) != list])
         fbest = np.max([alist[-1].outputs['stability'] for alist in self.actions.values() if alist[-1].outputs.get('stability',None) != None])
         return mean + (1-self.epsilon) * std
 
@@ -121,7 +138,7 @@ class MLStrategy:
         setattr(self, 'BO_acq_func', BO_acq_func_map[BO_acq_func_name])
 
     def MC_savf_update(self):
-        for sample_number in self.get_unprocessed_sample_numbers():
+        for sample_number in self.get_sample_numbers():
             reward_list = [a.reward for a in self.actions[sample_number]]
             for action_idx,action in enumerate(self.actions[sample_number]):
                 count = self.savfs[action.name][0] + 1
@@ -186,6 +203,8 @@ class MLStrategy:
         self.update_savfs()
         self.update_GPRs()
         self.processed_samples = len(self.actions)
+        if self.include_MAE != False:
+            self.calculate_MAE()
 
     def update_epsilon(self):
         return None
@@ -197,9 +216,6 @@ class MLStrategy:
                 return None
             inputs = self.get_GPR_inputs(GPR_key, sample_numbers)
             targets = self.get_GPR_targets(GPR_key, sample_numbers)
-            if hasattr(self.GPRs[GPR_key], 'X_train_'):
-                inputs = np.append(self.GPRs[GPR_key].X_train_, inputs, axis=0)
-                targets = np.append(self.GPRs[GPR_key].y_train_, targets, axis=0)
             self.GPRs[GPR_key].fit(inputs, targets)
 
     def get_GPR_sample_numbers(
@@ -212,7 +228,7 @@ class MLStrategy:
         if ignore_stability_target:
             target_names = tuple([exp_name for exp_name in target_names if exp_name != 'Stability'])
         return [sam_num
-                for sam_num in self.get_unprocessed_sample_numbers()
+                for sam_num in self.get_sample_numbers(unprocessed_only=False)
                 if  np.all(np.isin( input_names,[a.name for a in self.actions[sam_num]]))
                 and np.all(np.isin(target_names,[a.name for a in self.actions[sam_num]]))]
     
@@ -237,7 +253,19 @@ class MLStrategy:
             action_idxs = [temp_map[name] for name in GPR_key[1]]
             targets.append([_ for l in [self.actions[sam_num][idx].get_outputs() for idx in action_idxs] for _ in l])
         return np.array(targets).reshape(len(sample_numbers),-1)
-
+    
+    def calculate_MAE(self):
+        for key in self.MAE:
+            input_labels, input_values = self.environment.experiments[key[0][0]].get_input_space()
+            prediction = self.GPRs[key].predict(input_values).flatten()
+            truth = self.environment.experiments[key[1][0]].calc_stability({(key[0][0],label):input_values[:,lidx].reshape(-1,1) for lidx,label in enumerate(input_labels)}).flatten()
+            self.MAE[key].append(
+                (np.mean(np.absolute(truth-prediction)),
+                 np.mean(np.abs(truth-prediction)/truth),
+                 self.GPRs[key].score(input_values,truth)
+                 ))
+        return
+    
 
 class BO1(MLStrategy):
 
@@ -246,6 +274,7 @@ class BO1(MLStrategy):
             environment: Union[ None, world.VSDLEnvironment ] = None,
             discount: float = 0.1,
             epsilon: float = 0.5,
+            include_MAE: bool = True,
             optimizer_method: str = 'Nelder-Mead',
             BO_acq_func_name: str = 'UCB',
             savf_update_method: str = 'MC',
@@ -258,6 +287,7 @@ class BO1(MLStrategy):
             environment=environment,
             discount=discount,
             epsilon=epsilon,
+            include_MAE=include_MAE,
             optimizer_method=optimizer_method,
             BO_acq_func_name=BO_acq_func_name,
             savf_update_method=savf_update_method,
@@ -280,10 +310,11 @@ class BO1(MLStrategy):
                 std = std.reshape(-1,1)
                 acq_func_output = self.BO_acq_func(mean,std)
                 best = sorted(
-                    [(acq_func_output[idx][0],
-                         input_labels,
-                         input_values[idx],
-                         experiment_name) for idx in range(len(input_values))] + best,
+                    [(
+                        acq_func_output[idx][0],
+                        input_labels,
+                        input_values[idx],
+                        experiment_name) for idx in range(len(input_values))] + best,
                     key = lambda x: x[0],
                     reverse=True)[:number_of_samples]
         return [

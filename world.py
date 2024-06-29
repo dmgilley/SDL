@@ -95,15 +95,19 @@ class Experiment:
     def calculate_outputs(self, sample, action):
         return None
 
-    def get_input_space(self, length=20):
+    def get_input_space(self, length=10, noise=0.1):
         if not self.parameters:
             return None
         input_labels = sorted(list(self.parameters.keys()))
         input_ranges = [np.linspace(self.parameters[_][0], self.parameters[_][1], num=length) for _ in input_labels]
         input_values = np.array(np.meshgrid(*input_ranges)).T.reshape(-1,len(input_ranges))
+        input_values += np.random.normal(loc=0.0, scale=noise*np.mean(input_values), size=input_values.shape)
+        for idx,val in enumerate(input_labels):
+            input_values[:,idx] = np.where(input_values[:,idx] < self.parameters[val][0],self.parameters[val][0],input_values[:,idx])
+            input_values[:,idx] = np.where(input_values[:,idx] > self.parameters[val][1],self.parameters[val][1],input_values[:,idx])
         return (input_labels, input_values)
     
-    def yield_input_spaces(self, length=15, chunk_size=15):
+    def yield_input_spaces(self, length=15, chunk_size=15, noise=0.1):
         if not self.parameters:
             return None
         input_labels = sorted(list(self.parameters.keys()))
@@ -112,6 +116,10 @@ class Experiment:
         for indexes in product(*indices):
             subranges = [sublist[idx:idx+chunk_size] for sublist, idx in zip(input_ranges, indexes)]
             input_values = np.array(np.meshgrid(*subranges)).T.reshape(-1,len(subranges))
+            input_values += np.random.normal(loc=0.0, scale=noise*np.mean(input_values), size=input_values.shape)
+            for idx,val in enumerate(input_labels):
+                input_values[:,idx] = np.where(input_values[:,idx] < self.parameters[val][0],self.parameters[val][0],input_values[:,idx])
+                input_values[:,idx] = np.where(input_values[:,idx] > self.parameters[val][1],self.parameters[val][1],input_values[:,idx])
             yield (input_labels,input_values)
 
 
@@ -444,3 +452,7 @@ class VSDLEnvironment:
         if exclude:
             return sorted([k for k,v in self.experiments.items() if v.category not in category])
         return sorted([k for k,v in self.experiments.items() if v.category in category])
+    
+    def get_input_dimensionality(self):
+        experiment_name = self.get_experiment_names(category='processing')[0]
+        return len(self.experiments[experiment_name].parameters)

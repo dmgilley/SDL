@@ -132,7 +132,10 @@ class Campaign():
                 )
         return
 
-    def initial_VSDL_exploration(self, verbose: bool = False) -> None:
+    def initial_VSDL_exploration(
+            self,
+            verbose: bool = False
+            ) -> None:
         for p_experiment_name in self.environment.get_experiment_names(category='processing'):
             parameter_labels, parameter_values = self.environment.experiments[p_experiment_name].get_input_space(
                 length = self.initial_datapoints_per_parameter)
@@ -157,7 +160,11 @@ class Campaign():
                 self.agent.update_after_sample(sample)
         self.agent.update_after_episode()
 
-    def run_campaign(self, verbose: bool = False) -> None:
+
+    def run_campaign(
+            self,
+            verbose: bool = False
+            ) -> None:
         for batch in range(1,self.number_of_batches+1):
             if verbose:
                 print('\n  running batch {} ({})...'.format(batch,datetime.datetime.now()))
@@ -174,31 +181,4 @@ class Campaign():
                     sample.add_action(action)
                 self.agent.update_after_sample(sample)
             self.agent.update_after_episode()
-
-    def dump_to_MAE(self, MAE: Union[None, Dict[int,float]] = None) -> None:
-        filename = self.name + '.MAEout.txt'
-        if not MAE:    
-            with open(filename,'w') as f:
-                f.write('Written {}\n\n'.format(datetime.datetime.now()))
-            return
-        with open(filename,'a') as f:
-            for run in sorted(MAE.keys()):
-                f.write('Run {}\n\n'.format(run))
-                f.write('{}\n\n'.format(json.dumps(MAE[run])))
-        return
-
-    def calculate_MAE(self):
-        data = read_output(
-            self.name + '.out.txt',
-            data=OutputData(
-                    self.name, 
-                    calc_stability = self.environment.experiments['Stability'].calc_stability))
-        self.dump_to_MAE()
-        for experiment_name in self.environment.get_experiment_names(category='processing'):
-            reference_inputs = self.environment.experiments[experiment_name].get_input_space(length=25)
-            reference_targets = data.calc_stability({k:reference_inputs[1][:,idx] for idx,k in enumerate(reference_inputs[0])})
-            MAE = {run: get_cumulative_MAE(data,run,reference_inputs[1],reference_targets) for run in range(1,data.runs+1)}
-            del reference_inputs,reference_targets
-            gc.collect()
-            self.dump_to_MAE(MAE)
         return

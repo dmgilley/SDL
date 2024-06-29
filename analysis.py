@@ -1,5 +1,5 @@
 
-from sdlabs import material,world,strategy
+from sdlabs import world,strategy
 from sdlabs.utility import *
 import datetime
 from typing import *
@@ -41,9 +41,9 @@ class OutputData():
                     self.timestamp = data[1]
                     continue
                 if data[0] == 'sampling_procedure':
-                    self.initial_datapoints_per_parameter = data[1][0]
-                    self.number_of_batches = data[1][1]
-                    self.samples_per_batch = data[1][2]
+                    self.initial_datapoints_per_parameter = data[1][0][1]
+                    self.number_of_batches = data[1][1][1]
+                    self.samples_per_batch = data[1][2][1]
                     continue
                 if data[0] == 'environment':
                     self.environment = data[1]
@@ -56,26 +56,51 @@ class OutputData():
                     continue
         self.runs = run
         return
+    
+    def compile_sample_numbers(self):
+        initial_sample_numbers = list(range(
+            1,
+            self.initial_datapoints_per_parameter**(self.environment.get_input_dimensionality())+1))
+        return [initial_sample_numbers] + [
+            list(range(
+                batch_idx*self.samples_per_batch+initial_sample_numbers[-1]+1,
+                (batch_idx+1)*self.samples_per_batch+initial_sample_numbers[-1]+1))
+                for batch_idx in range(self.number_of_batches)]
 
-
-def compare_variable(data1, data2, variable):
-    list_1 = data1.combine_runs(variable)
-    list_2 = data2.combine_runs(variable)
-    return [(sum(1 for x, y in zip(sublist1, sublist2) if x >= y) / len(sublist1))
-            for sublist1, sublist2 in zip(list_1, list_2)]
-
-
-def read_MAEoutput(MAEfile):
-    run = 0
-    MAEdata = {}
-    with open(MAEfile) as f:
-        for line in f:
-            fields = line.split()
-            if not fields: continue
-            if fields[0] == '#': continue
-            if fields[0].lower() == 'run':
-                run = int(fields[1])
-                continue
-            if is_jsonable(line):
-                MAEdata[run] = json.loads(line)
-    return MAEdata
+    def average_stability_over_runs(self, include_initial_exploration=False):
+        starting_batch_idx = 1
+        if include_initial_exploration:
+            starting_batch_idx = 0
+        compiled_data = [
+            np.array([[
+                self.agents[run].stabilities[sample_number][-1][0]
+                if self.agents[run].stabilities[sample_number][-1][0] != None
+                else self.agents[run].stabilities[sample_number][-2][0]
+                for sample_number in list_of_sample_numbers ]#if self.agents[run].stabilities[sample_number][-1][0] != None]
+                    for run in sorted(self.agents.keys()) if run != 0]).flatten()
+                        for list_of_sample_numbers in self.compile_sample_numbers()[starting_batch_idx:]]
+        return np.array([np.mean(_) for _ in compiled_data]).flatten(), np.array([np.std(_) for _ in compiled_data]).flatten()
+    
+    def average_MAE_over_runs(self, include_initial_exploration=False):
+        starting_batch_idx = 1
+        if include_initial_exploration:
+            starting_batch_idx = 0
+        batch_idxs = list(range(starting_batch_idx,self.number_of_batches+1))
+        MAE_keys = sorted(list(self.agents[0].MAE.keys()))
+        compiled = {
+            MAE_key:[
+                [
+                    self.agents[run].MAE[MAE_key][b_idx] for run in range(self.runs+1) if run!= 0
+                ]
+                for b_idx in batch_idxs
+            ]
+            for MAE_key in MAE_keys
+        }
+        return {
+            MAE_key:tuple(
+                np.array([
+                    [np.mean([_[idx] for _ in list_]) for list_ in compiled[MAE_key]],
+                    [np.std([_[idx] for _ in list_])  for list_ in compiled[MAE_key]],]
+                ).transpose()
+            for idx in range(3))
+        for MAE_key in MAE_keys}
