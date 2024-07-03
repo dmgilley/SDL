@@ -300,6 +300,22 @@ class BO1(MLStrategy):
         self.epsilon = np.min([ 0.90, self.epsilon + np.abs(0.2*self.epsilon) ])
         return
     
+    def MC_savf_update(self):
+        for sample_number in self.get_sample_numbers():
+            if self.actions[sample_number][-1].category != 'stability':
+                action = self.actions[sample_number][-1]
+                count = self.savfs[action.name][0] + 1
+                Gt = action.reward
+                new_savf = self.savfs[action.name][1] + (Gt - self.savfs[action.name][1])/(count)
+                self.savfs[action.name] = (count, new_savf)
+                continue
+            reward_list = [a.reward for a in self.actions[sample_number]]
+            for action_idx,action in enumerate(self.actions[sample_number]):
+                count = self.savfs[action.name][0] + 1
+                Gt = np.sum([(self.discount**reward_idx)*reward for reward_idx,reward in enumerate(reward_list[action_idx:])])
+                new_savf = self.savfs[action.name][1] + (Gt - self.savfs[action.name][1])/(count)
+                self.savfs[action.name] = (count, new_savf)
+    
     def get_processing_actions(self, number_of_samples=1):
         best = []
         for experiment_name in self.environment.get_experiment_names(category='processing'):
@@ -375,6 +391,30 @@ class BO1(MLStrategy):
         if sample_number == None:
             sample_number = self.sample_number
 
+        if self.stabilities[sample_number][-1][0] == None:
+
+            for action_idx,action in enumerate(self.actions[sample_number][:-1]):
+                self.actions[sample_number][action_idx].reward = -self.environment.experiments[action.name].cost
+
+            stability_cost = self.environment.experiments[self.environment.get_experiment_names(category='stability')[0]].cost
+            uncertainty = self.stabilities[sample_number][-2][1]/self.stabilities[sample_number][-2][0]
+            self.actions[sample_number][-1].reward = stability_cost*(np.log(0.2/uncertainty)/2 - 1)
+
+            return None
+        
+        true_stability = self.stabilities[sample_number][-1][0]
+        for action_idx,action in enumerate(self.actions[sample_number]):
+
+            if action.category in ['processing','stability']:
+                self.actions[sample_number][action_idx].reward = -self.environment.experiments[action.name].cost
+
+            if action.category == 'characterization':
+                error = np.abs((self.stabilities[sample_number][action_idx][0] - true_stability)/(true_stability))
+                self.actions[sample_number][action_idx].reward = self.environment.experiments[action.name].cost*np.log(0.3/error)/2
+
+        return None
+
+
         mean_stabilities = [_[0] for _ in self.stabilities[sample_number]]
         std_stabilities =  [_[1] for _ in self.stabilities[sample_number]]
         
@@ -394,3 +434,5 @@ class BO1(MLStrategy):
             if 0 not in mean_stabilities_1:
                 deltaRSD = (std_stabilities_1[0]/mean_stabilities_1[0]) - (std_stabilities_1[1]/mean_stabilities_1[1])
             self.actions[sample_number][action_idx].reward = 100*deltaRSD - self.environment.experiments[action.name].cost
+
+        return None
