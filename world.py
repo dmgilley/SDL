@@ -354,10 +354,13 @@ class AFM2(Experiment):
             cost=cost)
         
     def calculate_outputs(self, sample, action):
+        var1 = f2(sample)
+        var2 = f3(sample)
+        var3 = f4(sample)
         return {
-            'RMS_surface_roughness': np.array(np.random.rand()*50), # expected 0 - 50 nm
-            'phase_angle': np.array(np.random.rand()*180-90), # expected -90 to 90 degrees
-            'pore_size': np.array(np.random.rand()*1500), # expected 0 - 1500 nm
+            'RMS_surface_roughness': np.array(np.random.rand(var1.shape[0],var1.shape[1])*50), # expected 0 - 50 nm
+            'phase_angle': np.array(np.random.rand(var2.shape[0],var2.shape[1])*180-90), # expected -90 to 90 degrees
+            'pore_size': np.array(np.random.rand(var3.shape[0],var3.shape[1])*1500), # expected 0 - 1500 nm
         }
 
 
@@ -456,3 +459,24 @@ class VSDLEnvironment:
     def get_input_dimensionality(self):
         experiment_name = self.get_experiment_names(category='processing')[0]
         return len(self.experiments[experiment_name].parameters)
+    
+    def get_input_keys(self,
+                       key_type: str = 'all',
+                       category: Union[str, List[str]] = 'all',
+                       exclude: bool = False,
+                       include_stability: bool = False) -> List[Tuple[str]]:
+        
+        if key_type == 'single_exp':
+            return [tuple([_]) for _ in self.get_experiment_names(category=category, exclude=exclude)]
+
+        if key_type == 'all':
+            system = {experiment_name:experiment.action_space for experiment_name,experiment in self.experiments.items()}
+            input_keys = []
+            for start in self.get_experiment_names(category='processing'):
+                for end in self.get_experiment_names(category=['stability','turn_back']):
+                    input_keys += find_paths(system, start, end, include_endpoint=False)
+                    input_keys += find_paths(system, start, end, include_endpoint=include_stability)
+            input_keys = list(set(input_keys))
+            input_keys.sort(key=lambda x: str(x))
+            input_keys.sort(key=lambda x: len(x))
+            return input_keys

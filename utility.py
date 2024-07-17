@@ -124,3 +124,49 @@ def parse_function_inputs(
 
     else:
         raise ValueError("Invalid input type. Supported types: float, dict, material.Material")
+    
+
+def find_paths(
+        system: Dict,
+        start: str,
+        end: str,
+        include_endpoint: bool = False,
+        visited: Union[None, Set] = None,
+        path: Union[None, List[str]] = None) -> List[Tuple[str]]:
+
+    if visited is None:
+        visited = set()
+    if path is None:
+        path = []
+
+    # Mark the current state as visited
+    visited.add(start)
+    path.append(start)
+
+    # Base case: If the current state is the ending state
+    if start == end:
+        if include_endpoint == True:
+            return [[path[0]] + sorted(path[1:-1]) + [path[-1]]]
+        return [[path[0]] + sorted(path[1:-1])]
+
+    # Recursive case: Explore neighbors
+    paths = []
+    for neighbor in system.get(start, []):
+        if neighbor not in visited:
+            new_paths = find_paths(system, neighbor, end, include_endpoint, visited.copy(), path.copy())
+            paths.extend(new_paths)
+
+    paths = list(set([tuple(_) for _ in paths]))
+    paths.sort(key=lambda x: str(x))
+    paths.sort(key=lambda x: len(x))
+
+    return paths
+
+def assemble_action_key(
+        list_of_actions: List[material.Action],
+        include_stability: bool = False) -> Tuple[str]:
+    if list_of_actions[-1].category in ['turn_back','stability']:
+        if include_stability == True:
+            return tuple([list_of_actions[0].name] + sorted([_.name for _ in list_of_actions[1:-1]]) + [list_of_actions[-1].name])
+        return tuple([list_of_actions[0].name] + sorted([_.name for _ in list_of_actions[1:-1]]))
+    return tuple([list_of_actions[0].name] + sorted([_.name for _ in list_of_actions[1:]]))

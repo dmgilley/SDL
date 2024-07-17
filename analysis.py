@@ -86,11 +86,11 @@ class OutputData():
         if include_initial_exploration:
             starting_batch_idx = 0
         batch_idxs = list(range(starting_batch_idx,self.number_of_batches+1))
-        MAE_keys = sorted(list(self.agents[0].MAE.keys()))
+        MAE_keys = sorted(list(self.agents[0].MAEs.keys()))
         compiled = {
             MAE_key:[
                 [
-                    self.agents[run].MAE[MAE_key][b_idx] for run in range(self.runs+1) if run!= 0
+                    self.agents[run].MAEs[MAE_key][b_idx] for run in range(self.runs+1) if run!= 0
                 ]
                 for b_idx in batch_idxs
             ]
